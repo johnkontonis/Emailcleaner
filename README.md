@@ -40,10 +40,12 @@ python3 -m http.server 8000
 ## Project layout
 
 ```
-index.html        # screens: start, game, result
-css/styles.css    # styling
-js/data.js        # curated player dataset + DataProvider seam
-js/game.js        # slot machine, round flow, simulation, rendering
+index.html                      # screens: start, game, result
+css/styles.css                  # styling
+js/data.js                      # curated player dataset + DataProvider seam
+js/game.js                      # slot machine, round flow, simulation, rendering
+scripts/build_dataset.py        # regenerate js/data.js with verified stats (nba_api)
+.github/workflows/refresh-stats.yml  # run the build script from CI
 ```
 
 ## Player data
@@ -56,5 +58,23 @@ All data is accessed through the async `DataProvider` interface in `js/data.js`
 (`getDecades`, `getTeams`, `getRoster`). To swap in a live stats API later,
 reimplement those three methods to `fetch()` and return the same shapes — no
 game logic needs to change.
+
+### Upgrading to verified stats
+
+`scripts/build_dataset.py` replaces the approximate averages with **real career
+numbers** from stats.nba.com (via [`nba_api`](https://github.com/swar/nba_api)),
+keeping the curated structure (each player's franchise/decade and eligible
+positions — which `nba_api` doesn't expose). It must run somewhere
+stats.nba.com is reachable (your machine or a GitHub Actions runner — not every
+sandbox can reach it):
+
+```bash
+pip install nba_api
+python scripts/build_dataset.py            # rewrite js/data.js in place
+python scripts/build_dataset.py --dry-run  # report only, write nothing
+```
+
+Or trigger the **Refresh player stats** workflow from the Actions tab. Players
+that can't be resolved keep their curated numbers and are reported.
 
 > This is an independent fan project and is not affiliated with 82-0.com or the NBA.
