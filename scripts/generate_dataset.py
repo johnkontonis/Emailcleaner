@@ -34,7 +34,7 @@ import io
 import json
 import sys
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +45,37 @@ CSV_URL = (
     "nba-player-advanced-metrics/master/nba-data-historical.csv"
 )
 CSV_CACHE = ROOT / "data" / "nba-data-historical.csv"
+
+# Player box scores (2010-2024) with real, separate steals & blocks. Used to
+# build current (2020s) rosters, which the 538 set (ends 2020) doesn't cover.
+BOX_BASE = (
+    "https://raw.githubusercontent.com/NocturneBear/NBA-Data-2010-2024/main/"
+)
+BOX_FILES = [
+    "regular_season_box_scores_2010_2024_part_1.csv",
+    "regular_season_box_scores_2010_2024_part_2.csv",
+    "regular_season_box_scores_2010_2024_part_3.csv",
+]
+
+# Box-score short team name -> franchise display name (current identities;
+# we only read 2021+ rows, so names are unambiguous).
+BOX_TEAMS = {
+    "76ers": "Philadelphia 76ers", "Bucks": "Milwaukee Bucks",
+    "Bulls": "Chicago Bulls", "Cavaliers": "Cleveland Cavaliers",
+    "Celtics": "Boston Celtics", "Clippers": "Los Angeles Clippers",
+    "Grizzlies": "Memphis Grizzlies", "Hawks": "Atlanta Hawks",
+    "Heat": "Miami Heat", "Hornets": "Charlotte Hornets", "Jazz": "Utah Jazz",
+    "Kings": "Sacramento Kings", "Knicks": "New York Knicks",
+    "Lakers": "Los Angeles Lakers", "Magic": "Orlando Magic",
+    "Mavericks": "Dallas Mavericks", "Nets": "Brooklyn Nets",
+    "Nuggets": "Denver Nuggets", "Pacers": "Indiana Pacers",
+    "Pelicans": "New Orleans Pelicans", "Pistons": "Detroit Pistons",
+    "Raptors": "Toronto Raptors", "Rockets": "Houston Rockets",
+    "Spurs": "San Antonio Spurs", "Suns": "Phoenix Suns",
+    "Thunder": "Oklahoma City Thunder", "Timberwolves": "Minnesota Timberwolves",
+    "Trail Blazers": "Portland Trail Blazers", "Warriors": "Golden State Warriors",
+    "Wizards": "Washington Wizards",
+}
 
 DECADES = ["1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s"]
 
@@ -161,6 +192,94 @@ def build_from_538(rows):
     return rosters
 
 
+def played(minutes: str) -> bool:
+    """True if the player actually logged time (box scores include DNP rows)."""
+    m = (minutes or "").strip()
+    if not m:
+        return False
+    if ":" in m:
+        mm, _, ss = m.partition(":")
+        return (num(mm) or 0) > 0 or (num(ss) or 0) > 0
+    return (num(m) or 0) > 0
+
+
+def infer_positions(coarse, ppg, rpg, apg, bpg):
+    """Map the box score's coarse G/F/C (often blank) to finer eligibility."""
+    if coarse == "G":
+        return ["PG", "SG"]
+    if coarse == "F":
+        return ["SF", "PF"]
+    if coarse == "C":
+        return ["C", "PF"]
+    # Blank -> infer from production.
+    if rpg >= 7 or bpg >= 0.9:
+        return ["PF", "C"]
+    if apg >= 4:
+        return ["PG", "SG"]
+    return ["SF", "SG"]
+
+
+def load_box_rows():
+    rows = []
+    for fname in BOX_FILES:
+        cache = ROOT / "data" / fname
+        if cache.exists():
+            text = cache.read_text(encoding="utf-8", errors="replace")
+        else:
+            print(f"Downloading {fname} ...")
+            with urllib.request.urlopen(BOX_BASE + fname, timeout=180) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+            cache.write_text(text, encoding="utf-8")
+        rows.extend(csv.DictReader(io.StringIO(text)))
+    return rows
+
+
+def build_from_boxscores(min_end_year=2021):
+    """Aggregate real per-game stats for current (2020s) players, by team."""
+    rows = load_box_rows()
+    agg: dict = defaultdict(lambda: {
+        "gp": 0, "pts": 0.0, "reb": 0.0, "ast": 0.0, "stl": 0.0, "blk": 0.0,
+        "pos": Counter(),
+    })
+    for r in rows:
+        end_year = int(r["season_year"][:4]) + 1
+        if end_year < min_end_year:
+            continue
+        if not played(r.get("minutes")):
+            continue
+        team = BOX_TEAMS.get((r.get("teamName") or "").strip())
+        if not team:
+            continue
+        key = (team, r["personName"])
+        a = agg[key]
+        a["gp"] += 1
+        a["pts"] += num(r["points"]) or 0
+        a["reb"] += num(r["reboundsTotal"]) or 0
+        a["ast"] += num(r["assists"]) or 0
+        a["stl"] += num(r["steals"]) or 0
+        a["blk"] += num(r["blocks"]) or 0
+        pos = (r.get("position") or "").strip()
+        if pos:
+            a["pos"][pos] += 1
+
+    roster = defaultdict(list)
+    for (team, name), a in agg.items():
+        gp = a["gp"]
+        if gp < 20:  # drop deep-bench cups of coffee
+            continue
+        ppg = round(a["pts"] / gp, 1)
+        rpg = round(a["reb"] / gp, 1)
+        apg = round(a["ast"] / gp, 1)
+        spg = round(a["stl"] / gp, 1)
+        bpg = round(a["blk"] / gp, 1)
+        coarse = a["pos"].most_common(1)[0][0] if a["pos"] else None
+        roster[team].append({
+            "name": name, "pos": infer_positions(coarse, ppg, rpg, apg, bpg),
+            "ppg": ppg, "rpg": rpg, "apg": apg, "spg": spg, "bpg": bpg,
+        })
+    return roster
+
+
 def merge_curated(rosters, seed):
     """Add curated players the 538 build is missing (by name within team/decade)."""
     added = 0
@@ -251,6 +370,12 @@ def main():
     rows = load_csv()
     print(f"Loaded {len(rows)} historical rows")
     rosters = build_from_538(rows)
+
+    # Current era (2020s) from real box scores — the 538 set ends at 2020.
+    box_2020s = build_from_boxscores(min_end_year=2021)
+    rosters["2020s"] = box_2020s
+    print(f"Built 2020s from box scores: "
+          f"{sum(len(v) for v in box_2020s.values())} players")
 
     seed = json.loads(SEED.read_text(encoding="utf-8")) if SEED.exists() else {}
     added = merge_curated(rosters, seed)

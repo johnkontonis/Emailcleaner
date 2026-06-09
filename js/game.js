@@ -29,6 +29,8 @@ const state = {
   skips: { team: 1, era: 1 },
   spinning: false,
   filter: "", // roster search text
+  posFilter: "ALL", // PG/SG/SF/PF/C or ALL
+  sort: "ppg", // ppg/rpg/apg/spg/bpg/name
 };
 
 // ---- DOM helpers -----------------------------------------------------------
@@ -177,11 +179,17 @@ function renderCourt() {
     const label = el("div", "slot-pos", pos);
     node.appendChild(label);
     if (slot) {
+      const meta = teamMeta(slot.team);
+      node.style.borderColor = meta.c1;
+      node.style.background = `linear-gradient(180deg, ${hexA(meta.c1, 0.32)} 0%, rgba(0,0,0,0.25) 100%)`;
+      node.appendChild(el("div", "slot-logo", teamBadgeHTML(meta)));
       node.appendChild(el("div", "slot-name", slot.player.name));
       node.appendChild(
-        el("div", "slot-meta", `${slot.team} · ${slot.decade}`)
+        el("div", "slot-meta", `${meta.abbr} · ${slot.decade}`)
       );
     } else {
+      node.style.borderColor = "";
+      node.style.background = "";
       node.appendChild(el("div", "slot-empty", POSITION_NAMES[pos]));
     }
     wrap.appendChild(node);
@@ -212,29 +220,39 @@ function statLine(pl) {
 }
 
 function renderRoster() {
-  const reel = $("#reel-team");
   const list = $("#roster-list");
   list.innerHTML = "";
 
   if (!state.current || state.round > TOTAL_ROUNDS) {
-    reel.textContent = "—";
+    const text = $("#reel-text");
+    if (text) text.textContent = "—";
     return;
   }
 
-  reel.innerHTML = `<span class="reel-decade">${state.current.decade}</span> <span class="reel-name">${state.current.team}</span>`;
+  setReel(state.current.decade, state.current.team);
+  const meta = teamMeta(state.current.team);
 
   const open = openPositions();
   const q = (state.filter || "").trim().toLowerCase();
+  const posFilter = state.posFilter || "ALL";
+  const sortKey = state.sort || "ppg";
 
-  // Eligible players first, then by scoring (roster is pre-sorted by PPG).
-  const roster = state.current.roster
-    .filter((pl) => !q || pl.name.toLowerCase().includes(q))
-    .slice()
-    .sort((a, b) => {
-      const ae = a.pos.some((p) => open.includes(p)) ? 0 : 1;
-      const be = b.pos.some((p) => open.includes(p)) ? 0 : 1;
-      return ae - be || b.ppg - a.ppg;
-    });
+  let roster = state.current.roster.filter(
+    (pl) =>
+      (!q || pl.name.toLowerCase().includes(q)) &&
+      (posFilter === "ALL" || pl.pos.includes(posFilter))
+  );
+
+  // Eligible (fits an open slot) first, then by the chosen sort.
+  const cmp =
+    sortKey === "name"
+      ? (a, b) => a.name.localeCompare(b.name)
+      : (a, b) => b[sortKey] - a[sortKey];
+  roster = roster.slice().sort((a, b) => {
+    const ae = a.pos.some((p) => open.includes(p)) ? 0 : 1;
+    const be = b.pos.some((p) => open.includes(p)) ? 0 : 1;
+    return ae - be || cmp(a, b);
+  });
 
   const total = state.current.roster.length;
   const eligibleCount = state.current.roster.filter((pl) =>
@@ -242,14 +260,16 @@ function renderRoster() {
   ).length;
   const count = $("#roster-count");
   if (count) {
-    count.textContent = q
-      ? `${roster.length} of ${total} shown`
-      : `${total} players · ${eligibleCount} fit an open slot`;
+    count.textContent =
+      q || posFilter !== "ALL"
+        ? `${roster.length} of ${total} shown`
+        : `${total} players · ${eligibleCount} fit an open slot`;
   }
 
   for (const pl of roster) {
     const eligible = pl.pos.filter((p) => open.includes(p));
     const card = el("div", "player-card" + (eligible.length ? "" : " disabled"));
+    card.style.setProperty("--team", meta.c1);
     card.innerHTML = `
       <div class="player-head">
         <span class="player-name">${pl.name}</span>
@@ -292,12 +312,43 @@ async function nextRound() {
     finishGame();
     return;
   }
-  // Fresh roster each round — clear any leftover search.
-  state.filter = "";
-  const search = $("#roster-search");
-  if (search) search.value = "";
+  // Fresh roster each round — clear any leftover search / filters.
+  resetRosterControls();
   await spinTo();
   render();
+}
+
+// Paint the slot-machine reel (and game-screen accent) for a team + decade.
+function setReel(decade, team) {
+  const meta = teamMeta(team);
+  const logo = $("#reel-logo");
+  const text = $("#reel-text");
+  if (text) {
+    text.innerHTML = `<span class="reel-decade">${decade}</span> <span class="reel-name">${team}</span>`;
+  }
+  if (logo) logo.innerHTML = teamBadgeHTML(meta);
+  const sm = $("#slot-machine");
+  if (sm) {
+    sm.style.borderColor = meta.c1;
+    sm.style.background = `linear-gradient(100deg, ${hexA(meta.c1, 0.22)} 0%, var(--panel) 60%)`;
+  }
+}
+
+// A small team mark: real logo if available, else a colored initials badge.
+function teamBadgeHTML(meta) {
+  if (meta.logo) {
+    return `<img class="team-logo" src="${meta.logo}" alt=""
+      onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'team-badge',textContent:'${meta.abbr}',style:'background:${meta.c1};color:#fff'}))" />`;
+  }
+  return `<span class="team-badge" style="background:${meta.c1};color:#fff">${meta.abbr}</span>`;
+}
+
+// hex (#rrggbb) -> rgba string at the given alpha.
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
 async function spinTo(opts) {
@@ -312,11 +363,12 @@ async function spinTo(opts) {
   for (let i = 0; i < ticks; i++) {
     const d = pick(decades);
     const teams = await DataProvider.getTeams(d);
-    reel.innerHTML = `<span class="reel-decade">${d}</span> <span class="reel-name">${pick(teams)}</span>`;
+    setReel(d, pick(teams));
     await sleep(40 + i * 12);
   }
 
   await newRoll(opts);
+  if (state.current) setReel(state.current.decade, state.current.team);
   reel.classList.remove("spinning");
   state.spinning = false;
 }
@@ -385,6 +437,20 @@ async function startGame(mode) {
   await nextRound();
 }
 
+function resetRosterControls() {
+  state.filter = "";
+  state.posFilter = "ALL";
+  state.sort = "ppg";
+  const search = $("#roster-search");
+  if (search) search.value = "";
+  const sort = $("#sort-select");
+  if (sort) sort.value = "ppg";
+  const chips = $("#pos-chips");
+  if (chips) {
+    for (const c of chips.children) c.classList.toggle("active", c.dataset.pos === "ALL");
+  }
+}
+
 function backToStart() {
   $("#result-screen").classList.add("hidden");
   $("#game-screen").classList.add("hidden");
@@ -416,6 +482,19 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#play-again").addEventListener("click", backToStart);
   $("#roster-search").addEventListener("input", (e) => {
     state.filter = e.target.value;
+    renderRoster();
+  });
+  $("#pos-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    state.posFilter = chip.dataset.pos;
+    for (const c of $("#pos-chips").children) {
+      c.classList.toggle("active", c === chip);
+    }
+    renderRoster();
+  });
+  $("#sort-select").addEventListener("change", (e) => {
+    state.sort = e.target.value;
     renderRoster();
   });
 });

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>82-0 — Build the Undefeated Team</title>
+    <title>82-0 · Built for Dion Kontonis</title>
     <link rel="stylesheet" href="css/styles.css" />
   </head>
   <body>
@@ -13,6 +13,7 @@
     <section id="start-screen" class="screen">
       <div class="hero">
         <h1 class="logo">82<span class="dash">–</span>0</h1>
+        <p class="built-for">Built for Dion Kontonis</p>
         <p class="tagline">
           The slot machine deals you a team and a decade. Pick one player, slot
           him in. Five rounds, five positions, five different eras. Build a
@@ -44,7 +45,10 @@
     <!-- GAME SCREEN -->
     <section id="game-screen" class="screen hidden">
       <header class="topbar">
-        <div class="brand">82<span class="dash">–</span>0</div>
+        <div class="brand">
+          82<span class="dash">–</span>0
+          <span class="brand-sub">Built for Dion Kontonis</span>
+        </div>
         <div class="topbar-right">
           <span id="mode-badge" class="badge">Classic</span>
           <span id="round-indicator" class="round">Round 1 / 5</span>
@@ -55,8 +59,11 @@
         <div id="court" class="court"></div>
       </div>
 
-      <div class="slot-machine">
-        <div class="reel" id="reel-team">—</div>
+      <div class="slot-machine" id="slot-machine">
+        <div class="reel" id="reel-team">
+          <span id="reel-logo" class="reel-logo"></span>
+          <span id="reel-text" class="reel-text">—</span>
+        </div>
         <div class="skips">
           <button id="team-skip" class="skip-btn">Team skip (1)</button>
           <button id="era-skip" class="skip-btn">Era skip (1)</button>
@@ -72,6 +79,28 @@
           autocomplete="off"
         />
         <span id="roster-count" class="roster-count"></span>
+      </div>
+
+      <div class="roster-filters">
+        <div class="pos-chips" id="pos-chips">
+          <button class="chip active" data-pos="ALL">All</button>
+          <button class="chip" data-pos="PG">PG</button>
+          <button class="chip" data-pos="SG">SG</button>
+          <button class="chip" data-pos="SF">SF</button>
+          <button class="chip" data-pos="PF">PF</button>
+          <button class="chip" data-pos="C">C</button>
+        </div>
+        <label class="sort-label">
+          Sort
+          <select id="sort-select" class="sort-select">
+            <option value="ppg">Points</option>
+            <option value="rpg">Rebounds</option>
+            <option value="apg">Assists</option>
+            <option value="spg">Steals</option>
+            <option value="bpg">Blocks</option>
+            <option value="name">Name (A–Z)</option>
+          </select>
+        </label>
       </div>
 
       <div id="roster-list" class="roster-list"></div>
@@ -110,6 +139,7 @@
     </footer>
 
     <script src="js/data.js"></script>
+    <script src="js/teams.js"></script>
     <script src="js/game.js"></script>
   </body>
 </html>
