@@ -289,6 +289,38 @@ body {
   cursor: not-allowed;
 }
 
+/* ---------- Roster toolbar ---------- */
+.roster-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.roster-search {
+  flex: 1;
+  min-width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 14px;
+  font-size: 15px;
+}
+
+.roster-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.roster-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* ---------- Roster list ---------- */
 .roster-list {
   display: grid;

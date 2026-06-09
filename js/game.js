@@ -28,6 +28,7 @@ const state = {
   current: null, // { decade, team, roster }
   skips: { team: 1, era: 1 },
   spinning: false,
+  filter: "", // roster search text
 };
 
 // ---- DOM helpers -----------------------------------------------------------
@@ -223,7 +224,30 @@ function renderRoster() {
   reel.innerHTML = `<span class="reel-decade">${state.current.decade}</span> <span class="reel-name">${state.current.team}</span>`;
 
   const open = openPositions();
-  for (const pl of state.current.roster) {
+  const q = (state.filter || "").trim().toLowerCase();
+
+  // Eligible players first, then by scoring (roster is pre-sorted by PPG).
+  const roster = state.current.roster
+    .filter((pl) => !q || pl.name.toLowerCase().includes(q))
+    .slice()
+    .sort((a, b) => {
+      const ae = a.pos.some((p) => open.includes(p)) ? 0 : 1;
+      const be = b.pos.some((p) => open.includes(p)) ? 0 : 1;
+      return ae - be || b.ppg - a.ppg;
+    });
+
+  const total = state.current.roster.length;
+  const eligibleCount = state.current.roster.filter((pl) =>
+    pl.pos.some((p) => open.includes(p))
+  ).length;
+  const count = $("#roster-count");
+  if (count) {
+    count.textContent = q
+      ? `${roster.length} of ${total} shown`
+      : `${total} players · ${eligibleCount} fit an open slot`;
+  }
+
+  for (const pl of roster) {
     const eligible = pl.pos.filter((p) => open.includes(p));
     const card = el("div", "player-card" + (eligible.length ? "" : " disabled"));
     card.innerHTML = `
@@ -268,6 +292,10 @@ async function nextRound() {
     finishGame();
     return;
   }
+  // Fresh roster each round — clear any leftover search.
+  state.filter = "";
+  const search = $("#roster-search");
+  if (search) search.value = "";
   await spinTo();
   render();
 }
@@ -386,4 +414,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#team-skip").addEventListener("click", teamSkip);
   $("#era-skip").addEventListener("click", eraSkip);
   $("#play-again").addEventListener("click", backToStart);
+  $("#roster-search").addEventListener("input", (e) => {
+    state.filter = e.target.value;
+    renderRoster();
+  });
 });
