@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>82-0 — Build the Undefeated Team</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div id="confetti" class="confetti-layer"></div>
+
+    <!-- START SCREEN -->
+    <section id="start-screen" class="screen">
+      <div class="hero">
+        <h1 class="logo">82<span class="dash">–</span>0</h1>
+        <p class="tagline">
+          The slot machine deals you a team and a decade. Pick one player, slot
+          him in. Five rounds, five positions, five different eras. Build a
+          lineup good enough to go <strong>undefeated</strong>.
+        </p>
+        <div class="mode-buttons">
+          <button id="play-classic" class="mode-btn primary">
+            <span class="mode-title">Classic</span>
+            <span class="mode-sub">Career stats shown</span>
+          </button>
+          <button id="play-hoopiq" class="mode-btn">
+            <span class="mode-title">Hoop IQ</span>
+            <span class="mode-sub">Stats hidden — go by knowledge</span>
+          </button>
+        </div>
+        <details class="how-to">
+          <summary>How to play</summary>
+          <ul>
+            <li>Each round, a random <b>decade</b> and <b>franchise</b> are rolled.</li>
+            <li>Pick exactly one player and place him at an open court position he actually played.</li>
+            <li>Fill all five spots: PG, SG, SF, PF, C — each from a different decade.</li>
+            <li>You get <b>one team skip</b> and <b>one era skip</b> per game.</li>
+            <li>After five picks, your season is simulated into a record from 0–82 to 82–0.</li>
+          </ul>
+        </details>
+      </div>
+    </section>
+
+    <!-- GAME SCREEN -->
+    <section id="game-screen" class="screen hidden">
+      <header class="topbar">
+        <div class="brand">82<span class="dash">–</span>0</div>
+        <div class="topbar-right">
+          <span id="mode-badge" class="badge">Classic</span>
+          <span id="round-indicator" class="round">Round 1 / 5</span>
+        </div>
+      </header>
+
+      <div class="court-wrap">
+        <div id="court" class="court"></div>
+      </div>
+
+      <div class="slot-machine">
+        <div class="reel" id="reel-team">—</div>
+        <div class="skips">
+          <button id="team-skip" class="skip-btn">Team skip (1)</button>
+          <button id="era-skip" class="skip-btn">Era skip (1)</button>
+        </div>
+      </div>
+
+      <div id="roster-list" class="roster-list"></div>
+    </section>
+
+    <!-- RESULT SCREEN -->
+    <section id="result-screen" class="screen hidden">
+      <div class="result-card">
+        <p class="result-label">Final projected record</p>
+        <h2 id="result-record" class="record">0–0</h2>
+        <div class="grade-row">
+          <span class="grade-label">Grade</span>
+          <span id="result-grade" class="grade">A</span>
+        </div>
+        <p id="result-blurb" class="result-blurb"></p>
+
+        <ul id="result-lineup" class="result-lineup"></ul>
+
+        <div class="result-extras">
+          <div class="extra">
+            <span class="extra-label">Best pick</span>
+            <span id="result-best" class="extra-value"></span>
+          </div>
+          <div class="extra">
+            <span class="extra-label">Biggest weakness</span>
+            <span id="result-weakness" class="extra-value"></span>
+          </div>
+        </div>
+
+        <button id="play-again" class="mode-btn primary play-again">Play again</button>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      A fan recreation of the 82-0 team-builder game. Stats are approximate.
+    </footer>
+
+    <script src="js/data.js"></script>
+    <script src="js/game.js"></script>
+  </body>
+</html>
