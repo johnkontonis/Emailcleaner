@@ -9,9 +9,10 @@
 
 const TOTAL_ROUNDS = 5;
 
-// Reference totals a 5-man starting lineup would need to be "elite" in each
-// category. Used to normalize the roster's combined stats into a strength.
-const ELITE = { ppg: 130, rpg: 50, apg: 32, spg: 8.5, bpg: 7.5 };
+// Combined 5-man totals that represent an "elite" lineup in each category
+// (catScore = 1.0). Anchored to the best totals actually reachable from the
+// full dataset, so a strong roster scores like one — not an automatic tank.
+const ELITE = { ppg: 120, rpg: 50, apg: 28, spg: 7.5, bpg: 6.5 };
 const CATEGORY_LABELS = {
   ppg: "Scoring",
   rpg: "Rebounding",
@@ -100,14 +101,17 @@ function simulate(lineup) {
   let strength = 0;
   for (const k of Object.keys(weights)) strength += catScore[k] * weights[k];
 
-  // Map strength (~0.45 floor .. ~1.15 ceiling) onto a 0..82 win curve.
-  const t = clamp((strength - 0.5) / (1.12 - 0.5), 0, 1);
-  let wins = Math.round(82 * easeInOutCubic(t));
+  // Map strength onto a 0..82 win curve. Anchored to measured play:
+  // a throw-together lineup (strength ~0.37) lands ~10 wins, a balanced
+  // effort (~0.61) ~.500, a strong roster (~0.84) ~70, and only a near-elite
+  // team (~0.93+) approaches a clean sheet.
+  const t = clamp((strength - 0.297) / 0.635, 0, 1);
+  let wins = Math.round(82 * t);
 
   // A perfect season only if the team is elite across the board, not just on
   // average — every category must clear the elite bar.
   const balanced = Object.values(catScore).every((v) => v >= 1.0);
-  if (balanced && strength >= 1.05) wins = 82;
+  if (balanced && strength >= 0.95) wins = 82;
   wins = clamp(wins, 0, 82);
   const losses = 82 - wins;
 
@@ -132,6 +136,7 @@ function simulate(lineup) {
     weakness: CATEGORY_LABELS[weakKey],
     totals,
     catScore,
+    strength,
   };
 }
 
@@ -156,8 +161,6 @@ function blurbFor(w) {
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 // ---- Rendering -------------------------------------------------------------
 function render() {
@@ -408,14 +411,43 @@ function showResult(r) {
 
   const lineupHtml = POSITIONS.map((pos) => {
     const s = state.lineup[pos];
-    return `<li><span class="rl-pos">${pos}</span> <span class="rl-name">${s.player.name}</span> <span class="rl-meta">${s.team} · ${s.decade}</span></li>`;
+    const meta = teamMeta(s.team);
+    return `<li><span class="rl-pos">${pos}</span> <span class="rl-name">${s.player.name}</span> <span class="rl-meta">${meta.abbr} · ${s.decade}</span></li>`;
   }).join("");
   $("#result-lineup").innerHTML = lineupHtml;
+
+  renderRatingBars(r);
 
   $("#result-best").textContent = r.bestPick.name;
   $("#result-weakness").textContent = r.weakness;
 
   if (perfect) launchConfetti();
+}
+
+// Show each category's combined total against the elite bar (catScore).
+function renderRatingBars(r) {
+  const rows = [
+    ["ppg", "Scoring", "PPG"],
+    ["rpg", "Rebounding", "RPG"],
+    ["apg", "Playmaking", "APG"],
+    ["spg", "Steals", "SPG"],
+    ["bpg", "Blocks", "BPG"],
+  ];
+  $("#rating-bars").innerHTML = rows
+    .map(([k, label, abbr]) => {
+      const pct = Math.round(Math.min(r.catScore[k], 1) * 100);
+      const elite = pct >= 100;
+      return `
+        <div class="rb-row">
+          <span class="rb-label">${label}</span>
+          <span class="rb-track">
+            <span class="rb-fill${elite ? " elite" : ""}" style="width:${pct}%"></span>
+          </span>
+          <span class="rb-val">${r.totals[k].toFixed(1)} ${abbr}</span>
+        </div>`;
+    })
+    .join("");
+  $("#rating-value").textContent = `${(r.strength * 100).toFixed(0)} / 100`;
 }
 
 // ---- Start / reset ---------------------------------------------------------
