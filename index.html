@@ -265,5 +265,12 @@
     <script src="js/data.js"></script>
     <script src="js/teams.js"></script>
     <script src="js/game.js"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
