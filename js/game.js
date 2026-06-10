@@ -63,8 +63,39 @@ function rosterCanFill(roster, open) {
   return roster.some((pl) => pl.pos.some((p) => open.includes(p)));
 }
 
-async function newRoll({ decade, excludeTeam } = {}) {
+// Unused decades (excluding the current one) where `team` has a playable
+// roster — used by an era skip to keep the team and change only the era.
+async function teamDecades(team, open) {
+  const all = await DataProvider.getDecades();
+  const out = [];
+  for (const d of all) {
+    if (state.usedDecades.includes(d)) continue;
+    if (state.current && d === state.current.decade) continue;
+    const roster = await DataProvider.getRoster(d, team);
+    if (roster.length && (!open || rosterCanFill(roster, open))) out.push(d);
+  }
+  return out;
+}
+
+// Roll a team + decade. Lock behavior:
+//   { decade }            -> team skip: keep the era, change the team
+//   { team }              -> era skip: keep the team, change the era
+//   {}                    -> fresh round: both random
+async function newRoll({ decade, team, excludeTeam } = {}) {
   const open = openPositions();
+
+  // Era skip: keep the team, move it to a different unused era.
+  if (team) {
+    const decs = await teamDecades(team, open);
+    if (decs.length) {
+      const d = pick(decs);
+      const roster = await DataProvider.getRoster(d, team);
+      state.current = { decade: d, team, roster };
+      return state.current;
+    }
+    // No other era has this team — fall through to a normal roll.
+  }
+
   // Try to land on a roll that can actually fill an open slot, so the game
   // never deadlocks when skips are gone. Fall back to whatever we last rolled
   // if (somehow) nothing qualifies after a bounded search.
@@ -354,19 +385,35 @@ function hexA(hex, a) {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
-async function spinTo(opts) {
+async function spinTo(opts = {}) {
   state.spinning = true;
   renderStatus();
+
+  // Clear the roster while the reel rolls — players leave the screen until the
+  // new team locks in.
+  const list = $("#roster-list");
+  if (list) list.innerHTML = "";
+  const count = $("#roster-count");
+  if (count) count.textContent = "Rolling…";
+
   const reel = $("#reel-team");
   reel.classList.add("spinning");
 
-  // Quick visual shuffle through random combos before locking in.
   const decades = await DataProvider.getDecades();
+  // Honor any lock during the shuffle: a team skip fixes the era, an era skip
+  // fixes the team.
+  const teamLock = opts.team || null;
+  let decadePool = decades;
+  if (teamLock) {
+    decadePool = await teamDecades(teamLock, null);
+    if (!decadePool.length) decadePool = decades;
+  }
+
   const ticks = 12;
   for (let i = 0; i < ticks; i++) {
-    const d = pick(decades);
-    const teams = await DataProvider.getTeams(d);
-    setReel(d, pick(teams));
+    const d = opts.decade || pick(decadePool);
+    const t = teamLock || pick(await DataProvider.getTeams(d));
+    setReel(d, t);
     await sleep(40 + i * 12);
   }
 
@@ -379,14 +426,16 @@ async function spinTo(opts) {
 async function teamSkip() {
   if (state.skips.team <= 0 || state.spinning || !state.current) return;
   state.skips.team -= 1;
+  // Keep the era, change the team.
   await spinTo({ decade: state.current.decade, excludeTeam: state.current.team });
   render();
 }
 
 async function eraSkip() {
-  if (state.skips.era <= 0 || state.spinning) return;
+  if (state.skips.era <= 0 || state.spinning || !state.current) return;
   state.skips.era -= 1;
-  await spinTo();
+  // Keep the team, change the era.
+  await spinTo({ team: state.current.team });
   render();
 }
 
