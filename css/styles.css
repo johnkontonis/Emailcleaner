@@ -966,6 +966,158 @@ body {
   padding: 26px 20px;
 }
 
+/* --------------------------- Court background ---------------------------- */
+.court-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.court-bg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.court-bg .lines {
+  stroke: rgba(245, 222, 179, 0.16);
+  stroke-width: 2.4;
+}
+
+/* darken the edges so foreground content keeps its contrast */
+.court-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 80% at 50% 30%, transparent 40%, rgba(9, 12, 20, 0.6) 100%),
+    linear-gradient(180deg, rgba(9, 12, 20, 0.35), rgba(9, 12, 20, 0.55));
+}
+
+/* ------------------------------ Fireworks ------------------------------- */
+.fx-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 60;
+}
+
+.fw-burst {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.fw-spark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+  color: #fff;
+  animation: spark 1.2s cubic-bezier(0.18, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes spark {
+  0% {
+    transform: translate(0, 0) scale(1.1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), calc(var(--dy) + 26px)) scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* --------------------------- Record W/L colors -------------------------- */
+.rec-w {
+  color: var(--good);
+}
+
+.rec-l {
+  color: var(--bad);
+}
+
+.rec-dash {
+  color: var(--muted);
+  margin: 0 8px;
+}
+
+/* --------------------------- Personal best ------------------------------ */
+.personal-best {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.personal-best b {
+  color: var(--accent);
+  font-family: var(--display);
+  font-size: 16px;
+}
+
+/* --------------------------- Result actions ----------------------------- */
+.result-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.action-btn {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  padding: 13px 14px;
+  border-radius: var(--radius-sm);
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: var(--body);
+  transition: transform 0.12s ease, border-color 0.12s ease,
+    filter 0.12s ease, background 0.12s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.action-btn.save {
+  color: var(--accent);
+  border-color: rgba(245, 185, 66, 0.4);
+}
+
+.action-btn.primary {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
+  color: var(--ink);
+  border: none;
+}
+
+.action-btn.primary:hover {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
 /* ------------------------------ Confetti -------------------------------- */
 .confetti-layer {
   position: fixed;

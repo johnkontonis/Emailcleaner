@@ -451,30 +451,57 @@ function finishGame() {
 }
 
 // ---- Result screen ---------------------------------------------------------
+let lastResult = null;
+
 function showResult(r) {
   $("#game-screen").classList.add("hidden");
   const screen = $("#result-screen");
   screen.classList.remove("hidden");
 
   const perfect = r.wins === 82;
-  $("#result-record").textContent = `${r.wins}–${r.losses}`;
-  $("#result-record").className = perfect ? "record perfect" : "record";
+  // Wins green, losses red (or a single gold gradient for a perfect season).
+  const rec = $("#result-record");
+  rec.className = perfect ? "record perfect" : "record";
+  rec.innerHTML = perfect
+    ? `${r.wins}–${r.losses}`
+    : `<span class="rec-w">${r.wins}</span><span class="rec-dash">–</span><span class="rec-l">${r.losses}</span>`;
   $("#result-grade").textContent = r.grade;
   $("#result-blurb").textContent = r.blurb;
 
-  const lineupHtml = POSITIONS.map((pos) => {
+  const lineup = POSITIONS.map((pos) => {
     const s = state.lineup[pos];
     const meta = teamMeta(s.team);
-    return `<li><span class="rl-pos">${pos}</span> <span class="rl-name">${s.player.name}</span> <span class="rl-meta">${meta.abbr} · ${s.decade}</span></li>`;
-  }).join("");
-  $("#result-lineup").innerHTML = lineupHtml;
+    return { pos, name: s.player.name, team: s.team, abbr: meta.abbr, decade: s.decade };
+  });
+  $("#result-lineup").innerHTML = lineup
+    .map(
+      (s) =>
+        `<li><span class="rl-pos">${s.pos}</span> <span class="rl-name">${s.name}</span> <span class="rl-meta">${s.abbr} · ${s.decade}</span></li>`
+    )
+    .join("");
 
   renderRatingBars(r);
-
   $("#result-best").textContent = r.bestPick.name;
   $("#result-weakness").textContent = r.weakness;
 
-  if (perfect) launchConfetti();
+  // Snapshot for saving / sharing.
+  lastResult = {
+    wins: r.wins,
+    losses: r.losses,
+    grade: r.grade,
+    strength: Math.round(r.strength * 100),
+    mode: state.mode,
+    lineup,
+    date: new Date().toISOString(),
+  };
+
+  // Reset the save button and show the standing personal best.
+  const saveBtn = $("#save-result");
+  saveBtn.disabled = false;
+  saveBtn.textContent = "★ Record this result";
+  renderPersonalBest();
+
+  launchCelebration(r.wins);
 }
 
 // Show each category's combined total against the elite bar (catScore).
@@ -556,20 +583,144 @@ function backToStart() {
   $("#start-screen").classList.remove("hidden");
 }
 
-// ---- Confetti (perfect season only) ----------------------------------------
-function launchConfetti() {
+// ---- Celebration (scales with the record) ----------------------------------
+const FX_COLORS = ["#f5b942", "#ffce6b", "#4cc2ff", "#34d399", "#f6685e", "#fff"];
+
+// Tiered: the better the season, the bigger the show.
+function launchCelebration(wins) {
+  if (wins >= 82) {
+    launchConfetti(150);
+    fireworksShow(7, 6); // bursts per wave, waves
+  } else if (wins >= 70) {
+    launchConfetti(90);
+    fireworksShow(5, 3);
+  } else if (wins >= 55) {
+    launchConfetti(60);
+    fireworksShow(3, 2);
+  } else if (wins >= 41) {
+    fireworksShow(2, 1);
+  }
+  // Below .500: no celebration — you've got work to do.
+}
+
+function launchConfetti(n = 90) {
   const c = $("#confetti");
   c.innerHTML = "";
-  const colors = ["#f9d342", "#ff5f6d", "#3ec6ff", "#7ee787", "#fff"];
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < n; i++) {
     const bit = el("div", "confetti-bit");
     bit.style.left = Math.random() * 100 + "vw";
-    bit.style.background = pick(colors);
-    bit.style.animationDelay = Math.random() * 0.8 + "s";
-    bit.style.animationDuration = 1.6 + Math.random() * 1.4 + "s";
+    bit.style.background = pick(FX_COLORS);
+    bit.style.animationDelay = Math.random() * 0.9 + "s";
+    bit.style.animationDuration = 1.6 + Math.random() * 1.6 + "s";
     c.appendChild(bit);
   }
-  setTimeout(() => (c.innerHTML = ""), 4000);
+  setTimeout(() => (c.innerHTML = ""), 4200);
+}
+
+function fireworksShow(burstsPerWave, waves) {
+  const layer = $("#fireworks");
+  let wave = 0;
+  const fire = () => {
+    for (let b = 0; b < burstsPerWave; b++) {
+      setTimeout(
+        () => firework(layer, 12 + Math.random() * 60, 8 + Math.random() * 44),
+        Math.random() * 500
+      );
+    }
+    if (++wave < waves) setTimeout(fire, 650);
+  };
+  fire();
+}
+
+function firework(layer, xVw, yVh) {
+  const color = pick(FX_COLORS);
+  const sparks = 26;
+  const burst = el("div", "fw-burst");
+  burst.style.left = xVw + "vw";
+  burst.style.top = yVh + "vh";
+  for (let i = 0; i < sparks; i++) {
+    const angle = (i / sparks) * Math.PI * 2;
+    const dist = 70 + Math.random() * 60;
+    const s = el("div", "fw-spark");
+    s.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+    s.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
+    s.style.background = color;
+    burst.appendChild(s);
+  }
+  layer.appendChild(burst);
+  setTimeout(() => burst.remove(), 1300);
+}
+
+// ---- Saving / sharing your record ------------------------------------------
+const RECORDS_KEY = "eighty2_records_v1";
+
+function loadRecords() {
+  try {
+    return JSON.parse(localStorage.getItem(RECORDS_KEY)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function bestRecord() {
+  const recs = loadRecords();
+  if (!recs.length) return null;
+  return recs.reduce((a, b) => (b.wins > a.wins ? b : a));
+}
+
+function renderPersonalBest() {
+  const best = bestRecord();
+  const node = $("#personal-best");
+  if (!best) {
+    node.classList.add("hidden");
+    return;
+  }
+  node.classList.remove("hidden");
+  node.innerHTML = `Personal best &nbsp;<b>${best.wins}–${best.losses}</b>&nbsp; (${best.grade}) · ${loadRecords().length} recorded`;
+}
+
+function saveResult() {
+  if (!lastResult) return;
+  const recs = loadRecords();
+  recs.push(lastResult);
+  try {
+    localStorage.setItem(RECORDS_KEY, JSON.stringify(recs.slice(-200)));
+  } catch {
+    /* storage may be unavailable (private mode) — fail quietly */
+  }
+  const btn = $("#save-result");
+  btn.textContent = "✓ Recorded";
+  btn.disabled = true;
+  renderPersonalBest();
+}
+
+async function shareResult() {
+  if (!lastResult) return;
+  const r = lastResult;
+  const five = r.lineup
+    .map((s) => `${s.pos}: ${s.name} (${s.abbr} ${s.decade})`)
+    .join("\n");
+  const text =
+    `82-0 · Built for Dion Kontonis\n` +
+    `My season: ${r.wins}–${r.losses} (Grade ${r.grade}, strength ${r.strength}/100)\n\n` +
+    `${five}\n\nPlay: https://emailcleaner-olive.vercel.app`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "82-0", text });
+    } else {
+      await navigator.clipboard.writeText(text);
+      showShareToast("Result copied to clipboard");
+    }
+  } catch {
+    /* user dismissed the share sheet — ignore */
+  }
+}
+
+function showShareToast(msg) {
+  const btn = $("#share-result");
+  const original = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => (btn.textContent = original), 1800);
 }
 
 // ---- Wire up ---------------------------------------------------------------
@@ -596,4 +747,6 @@ window.addEventListener("DOMContentLoaded", () => {
     state.sort = e.target.value;
     renderRoster();
   });
+  $("#save-result").addEventListener("click", saveResult);
+  $("#share-result").addEventListener("click", shareResult);
 });
