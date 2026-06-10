@@ -238,8 +238,19 @@ def load_box_rows():
     return rows
 
 
-def build_from_boxscores(min_end_year=2021):
-    """Aggregate real per-game stats for current (2020s) players, by team."""
+def map_box_team(name, end_year):
+    """Resolve a box-score team name to a franchise, disambiguating by year."""
+    name = (name or "").strip()
+    if name == "Bobcats":
+        return "Charlotte Hornets"
+    if name == "Hornets":
+        # 2011-2013 = New Orleans (now Pelicans); 2014+ = Charlotte.
+        return "New Orleans Pelicans" if end_year <= 2013 else "Charlotte Hornets"
+    return BOX_TEAMS.get(name)
+
+
+def build_from_boxscores(min_end_year=2011):
+    """Aggregate real per-game stats per (decade, team, player) from box scores."""
     rows = load_box_rows()
     agg: dict = defaultdict(lambda: {
         "gp": 0, "pts": 0.0, "reb": 0.0, "ast": 0.0, "stl": 0.0, "blk": 0.0,
@@ -251,10 +262,10 @@ def build_from_boxscores(min_end_year=2021):
             continue
         if not played(r.get("minutes")):
             continue
-        team = BOX_TEAMS.get((r.get("teamName") or "").strip())
+        team = map_box_team(r.get("teamName"), end_year)
         if not team:
             continue
-        key = (team, r["personName"])
+        key = (decade_of(end_year), team, r["personName"])
         a = agg[key]
         a["gp"] += 1
         a["pts"] += num(r["points"]) or 0
@@ -266,10 +277,10 @@ def build_from_boxscores(min_end_year=2021):
         if pos:
             a["pos"][pos] += 1
 
-    roster = defaultdict(list)
-    for (team, name), a in agg.items():
+    rosters: dict = defaultdict(lambda: defaultdict(list))
+    for (decade, team, name), a in agg.items():
         gp = a["gp"]
-        if gp < 20:  # drop deep-bench cups of coffee
+        if gp < 25:  # drop deep-bench cups of coffee over the decade
             continue
         ppg = round(a["pts"] / gp, 1)
         rpg = round(a["reb"] / gp, 1)
@@ -277,11 +288,11 @@ def build_from_boxscores(min_end_year=2021):
         spg = round(a["stl"] / gp, 1)
         bpg = round(a["blk"] / gp, 1)
         coarse = a["pos"].most_common(1)[0][0] if a["pos"] else None
-        roster[team].append({
+        rosters[decade][team].append({
             "name": name, "pos": infer_positions(coarse, ppg, rpg, apg, bpg),
             "ppg": ppg, "rpg": rpg, "apg": apg, "spg": spg, "bpg": bpg,
         })
-    return roster
+    return rosters
 
 
 def merge_curated(rosters, seed):
@@ -375,11 +386,14 @@ def main():
     print(f"Loaded {len(rows)} historical rows")
     rosters = build_from_538(rows)
 
-    # Current era (2020s) from real box scores — the 538 set ends at 2020.
-    box_2020s = build_from_boxscores(min_end_year=2021)
-    rosters["2020s"] = box_2020s
-    print(f"Built 2020s from box scores: "
-          f"{sum(len(v) for v in box_2020s.values())} players")
+    # 2010s + 2020s from real box scores (true separate steals/blocks), which
+    # is more accurate than the 538 per-36 derivation for those decades.
+    box = build_from_boxscores(min_end_year=2011)
+    for decade in ("2010s", "2020s"):
+        if box.get(decade):
+            rosters[decade] = box[decade]
+            print(f"Built {decade} from box scores: "
+                  f"{sum(len(v) for v in box[decade].values())} players")
 
     seed = json.loads(SEED.read_text(encoding="utf-8")) if SEED.exists() else {}
     added = merge_curated(rosters, seed)
