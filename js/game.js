@@ -866,28 +866,70 @@ function h2hTally() {
   return t;
 }
 
+// ---- Optional shared backend (cross-device scoreboard) ---------------------
+// Uses /api/scoreboard when a KV store is configured; otherwise no-ops and the
+// game stays local-only.
+const API = "/api/scoreboard";
+let remoteBoard = null; // last fetched shared board, or null when unavailable
+
+async function remoteGet() {
+  try {
+    const r = await fetch(API, { cache: "no-store" });
+    const j = await r.json();
+    remoteBoard = j && j.configured ? j : null;
+  } catch {
+    remoteBoard = null;
+  }
+  return remoteBoard;
+}
+
+async function remotePost(payload) {
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    remoteBoard = j && j.configured ? j : remoteBoard;
+  } catch {
+    /* offline / not configured — local store already has it */
+  }
+}
+
 // ---- Start-screen scoreboard ------------------------------------------------
-function renderScoreboard() {
-  const t = h2hTally();
-  const db = bestFor("Dion");
-  const jb = bestFor("John");
+function paintScoreboard(tally, dionBest, johnBest, synced) {
+  const total = tally.Dion + tally.John + tally.ties;
   const best = (b) => (b ? `${b.wins}–${b.losses} (${b.grade})` : "—");
   $("#scoreboard").innerHTML = `
-    <div class="sb-title">Head-to-head series</div>
+    <div class="sb-title">Head-to-head series ${
+      synced ? '<span class="sb-synced">● shared</span>' : ""
+    }</div>
     <div class="sb-h2h">
       <span class="sb-name dion">Dion</span>
-      <span class="sb-score">${t.Dion}<span class="sb-dash">–</span>${t.John}</span>
+      <span class="sb-score">${tally.Dion}<span class="sb-dash">–</span>${tally.John}</span>
       <span class="sb-name john">John</span>
     </div>
     <div class="sb-sub">${
-      t.Dion + t.John + t.ties === 0
+      total === 0
         ? "No matchups yet — play Head-to-Head"
-        : `${t.Dion + t.John + t.ties} played${t.ties ? ` · ${t.ties} tied` : ""}`
+        : `${total} played${tally.ties ? ` · ${tally.ties} tied` : ""}`
     }</div>
     <div class="sb-bests">
-      <div><span class="sb-dot dion"></span>Dion best <b>${best(db)}</b></div>
-      <div><span class="sb-dot john"></span>John best <b>${best(jb)}</b></div>
+      <div><span class="sb-dot dion"></span>Dion best <b>${best(dionBest)}</b></div>
+      <div><span class="sb-dot john"></span>John best <b>${best(johnBest)}</b></div>
     </div>`;
+}
+
+function renderScoreboard() {
+  // Paint from local immediately…
+  paintScoreboard(h2hTally(), bestFor("Dion"), bestFor("John"), false);
+  // …then upgrade to the shared board if a backend is configured.
+  remoteGet().then((board) => {
+    if (board) {
+      paintScoreboard(board.h2h, board.best.Dion, board.best.John, true);
+    }
+  });
 }
 
 // ---- Solo: record + share ---------------------------------------------------
@@ -918,6 +960,14 @@ function saveResult() {
   const store = loadStore();
   store[state.user].push(lastResult);
   saveStore(store);
+  remotePost({
+    type: "solo",
+    user: state.user,
+    wins: lastResult.wins,
+    losses: lastResult.losses,
+    grade: lastResult.grade,
+    strength: lastResult.strength,
+  });
   const btn = $("#save-result");
   btn.textContent = "✓ Recorded";
   btn.disabled = true;
@@ -1102,6 +1152,13 @@ function showH2HResult() {
   store.Dion.push({ ...d, mode: "h2h", date: new Date().toISOString() });
   store.John.push({ ...j, mode: "h2h", date: new Date().toISOString() });
   saveStore(store);
+  remotePost({
+    type: "h2h",
+    winner,
+    Dion: { wins: d.wins, losses: d.losses, grade: d.grade, strength: d.strength },
+    John: { wins: j.wins, losses: j.losses, grade: j.grade, strength: j.strength },
+    date: new Date().toISOString(),
+  });
 
   $("#game-screen").classList.add("hidden");
   $("#handoff-screen").classList.add("hidden");

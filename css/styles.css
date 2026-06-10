@@ -1195,6 +1195,12 @@ body {
   color: var(--muted);
 }
 
+.sb-synced {
+  color: var(--good);
+  letter-spacing: 0.5px;
+  margin-left: 6px;
+}
+
 .sb-h2h {
   display: flex;
   align-items: center;

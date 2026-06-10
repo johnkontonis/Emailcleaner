@@ -5,7 +5,7 @@
  * latest build) with a cache fallback for offline. Cross-origin assets (fonts,
  * team logos) are cache-first. Bump CACHE on meaningful asset changes.
  */
-const CACHE = "82-0-v2";
+const CACHE = "82-0-v3";
 const CORE = [
   "/",
   "/index.html",
@@ -37,7 +37,11 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
-  const sameOrigin = new URL(req.url).origin === self.location.origin;
+  const url = new URL(req.url);
+  const sameOrigin = url.origin === self.location.origin;
+
+  // The shared scoreboard must never be cached.
+  if (sameOrigin && url.pathname.startsWith("/api/")) return;
 
   if (sameOrigin) {
     // Network-first, fall back to cache (then to the app shell when offline).
