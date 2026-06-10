@@ -372,19 +372,69 @@ body {
 }
 
 /* ----------------------------- Slot machine ----------------------------- */
+/* Pinned so the team + open spots stay visible while scrolling the roster. */
 .slot-machine {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background-color: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: 13px 18px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.sm-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  margin-bottom: 10px;
-  box-shadow: var(--shadow-sm);
   flex-wrap: wrap;
-  transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+/* Open-position tracker */
+.sm-needs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.sm-needs-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.need {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--line-2);
+}
+
+.need.open {
+  color: var(--accent);
+  border-color: rgba(245, 185, 66, 0.45);
+  background: rgba(245, 185, 66, 0.1);
+}
+
+.need.done {
+  color: var(--faint);
+  text-decoration: none;
+  opacity: 0.7;
 }
 
 .reel {

@@ -199,7 +199,22 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function render() {
   renderCourt();
   renderStatus();
+  renderNeeds();
   renderRoster();
+}
+
+// Open-position tracker in the pinned panel, so you always know what you still
+// need to fill while scrolling the roster.
+function renderNeeds() {
+  const node = $("#sm-needs");
+  if (!node) return;
+  const open = openPositions();
+  node.innerHTML =
+    `<span class="sm-needs-label">Still need</span>` +
+    POSITIONS.map((pos) => {
+      const filled = !open.includes(pos);
+      return `<span class="need ${filled ? "done" : "open"}">${pos}${filled ? " ✓" : ""}</span>`;
+    }).join("");
 }
 
 function openPositions() {
@@ -366,7 +381,9 @@ function setReel(decade, team) {
   const sm = $("#slot-machine");
   if (sm) {
     sm.style.borderColor = meta.c1;
-    sm.style.background = `linear-gradient(100deg, ${hexA(meta.c1, 0.22)} 0%, var(--panel) 60%)`;
+    // Tint only the image layer so the panel's solid background stays opaque
+    // (it's sticky — the roster must not show through it).
+    sm.style.backgroundImage = `linear-gradient(100deg, ${hexA(meta.c1, 0.22)} 0%, transparent 55%)`;
   }
 }
 
