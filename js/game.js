@@ -434,8 +434,12 @@ async function teamSkip() {
 async function eraSkip() {
   if (state.skips.era <= 0 || state.spinning || !state.current) return;
   state.skips.era -= 1;
+  const keptTeam = state.current.team;
   // Keep the team, change the era.
-  await spinTo({ team: state.current.team });
+  await spinTo({ team: keptTeam });
+  if (state.current.team !== keptTeam) {
+    showRollNote(`${keptTeam} has no other open era — rolled a fresh team.`);
+  }
   render();
 }
 
@@ -516,6 +520,20 @@ async function startGame(mode) {
     mode === "hoopiq" ? "Hoop IQ" : "Classic";
 
   await nextRound();
+}
+
+let rollNoteTimer = null;
+function showRollNote(msg) {
+  const note = $("#roll-note");
+  if (!note) return;
+  note.textContent = msg;
+  note.classList.remove("hidden");
+  note.classList.add("show");
+  clearTimeout(rollNoteTimer);
+  rollNoteTimer = setTimeout(() => {
+    note.classList.remove("show");
+    setTimeout(() => note.classList.add("hidden"), 300);
+  }, 3200);
 }
 
 function resetRosterControls() {
