@@ -34,6 +34,7 @@ const state = {
   sort: "ppg", // ppg/rpg/apg/spg/bpg/name
   user: "Dion", // active solo user
   h2h: null, // head-to-head session, when active
+  daily: null, // { date, teams: [{decade, team}] } for the daily challenge
 };
 
 // ---- DOM helpers -----------------------------------------------------------
@@ -85,6 +86,14 @@ async function teamDecades(team, open) {
 //   {}                    -> fresh round: both random
 async function newRoll({ decade, team, excludeTeam } = {}) {
   const open = openPositions();
+
+  // Daily challenge: the five teams are fixed and shared by everyone today.
+  if (state.daily) {
+    const preset = state.daily.teams[state.round - 1];
+    const roster = await DataProvider.getRoster(preset.decade, preset.team);
+    state.current = { decade: preset.decade, team: preset.team, roster };
+    return state.current;
+  }
 
   // Era skip: keep the team, move it to a different unused era.
   if (team) {
@@ -252,10 +261,14 @@ function renderStatus() {
     state.round > TOTAL_ROUNDS
       ? "Season locked in"
       : `Round ${state.round} / ${TOTAL_ROUNDS}`;
+  // Skips are off in the daily challenge so everyone faces the same five teams.
+  const daily = !!state.daily;
+  const skips = $("#skips");
+  if (skips) skips.style.display = daily ? "none" : "";
   $("#team-skip").textContent = `Team skip (${state.skips.team})`;
   $("#era-skip").textContent = `Era skip (${state.skips.era})`;
-  $("#team-skip").disabled = state.skips.team <= 0 || state.spinning;
-  $("#era-skip").disabled = state.skips.era <= 0 || state.spinning;
+  $("#team-skip").disabled = daily || state.skips.team <= 0 || state.spinning;
+  $("#era-skip").disabled = daily || state.skips.era <= 0 || state.spinning;
 }
 
 function statLine(pl) {
@@ -497,8 +510,26 @@ function finishGame() {
       showH2HResult();
     }
   } else {
+    if (state.daily) recordDaily(result);
     showResult(result);
   }
+}
+
+// Keep each user's best score for today's daily challenge, for comparison.
+function recordDaily(result) {
+  const store = loadStore();
+  store.daily = store.daily || {};
+  const day = (store.daily[state.daily.date] = store.daily[state.daily.date] || {});
+  const prev = day[state.user];
+  if (!prev || result.wins > prev.wins) {
+    day[state.user] = {
+      wins: result.wins,
+      losses: result.losses,
+      grade: result.grade,
+      strength: Math.round(result.strength * 100),
+    };
+  }
+  saveStore(store);
 }
 
 // ---- Result screen ---------------------------------------------------------
@@ -613,13 +644,73 @@ async function beginBuild() {
 // Solo game, attributed to the selected user.
 async function startSolo(mode) {
   state.h2h = null;
+  state.daily = null;
   resetBuildState(mode);
   await beginBuild();
 }
 
 // Two-player head-to-head: Dion builds, then John, then compare.
 async function startH2H() {
+  state.daily = null;
   state.h2h = { builder: "Dion", results: {} };
+  resetBuildState("classic");
+  await beginBuild();
+}
+
+// ---- Daily challenge -------------------------------------------------------
+// Deterministic RNG so everyone gets the same five teams on a given day.
+function seededRand(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function todayStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// A team is dead-end-proof for the daily if it can field every position.
+function teamCoversAll(roster) {
+  const cov = new Set();
+  for (const pl of roster) pl.pos.forEach((p) => cov.add(p));
+  return POSITIONS.every((p) => cov.has(p));
+}
+
+async function buildDailyTeams(date) {
+  const rnd = seededRand(parseInt(date.replace(/-/g, ""), 10) || 1);
+  const pickR = (arr) => arr[Math.floor(rnd() * arr.length)];
+  const decades = (await DataProvider.getDecades()).slice();
+  // Seeded shuffle, take five distinct decades.
+  for (let i = decades.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [decades[i], decades[j]] = [decades[j], decades[i]];
+  }
+  const chosen = decades.slice(0, 5);
+  const teams = [];
+  for (const d of chosen) {
+    const names = await DataProvider.getTeams(d);
+    let team = null;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const cand = pickR(names);
+      if (teamCoversAll(await DataProvider.getRoster(d, cand))) {
+        team = cand;
+        break;
+      }
+    }
+    teams.push({ decade: d, team: team || pickR(names) });
+  }
+  return teams;
+}
+
+async function startDaily() {
+  state.h2h = null;
+  const date = todayStamp();
+  state.daily = { date, teams: await buildDailyTeams(date) };
   resetBuildState("classic");
   await beginBuild();
 }
@@ -801,10 +892,22 @@ function renderScoreboard() {
 
 // ---- Solo: record + share ---------------------------------------------------
 function renderPersonalBest() {
-  const best = bestFor(state.user);
   const node = $("#personal-best");
-  const count = (loadStore()[state.user] || []).length;
   node.classList.remove("hidden");
+
+  // Daily challenge: show today's Dion-vs-John comparison.
+  if (state.daily) {
+    const day = (loadStore().daily || {})[state.daily.date] || {};
+    const cell = (u) =>
+      day[u]
+        ? `<b class="${u.toLowerCase()}">${u} ${day[u].wins}–${day[u].losses}</b>`
+        : `<span class="${u.toLowerCase()}">${u} —</span>`;
+    node.innerHTML = `Today's challenge &nbsp; ${cell("Dion")} &nbsp;vs&nbsp; ${cell("John")}`;
+    return;
+  }
+
+  const best = bestFor(state.user);
+  const count = (loadStore()[state.user] || []).length;
   node.innerHTML = best
     ? `${state.user}'s best &nbsp;<b>${best.wins}–${best.losses}</b>&nbsp; (${best.grade}) · ${count} recorded`
     : `${state.user} has no recorded seasons yet`;
@@ -821,25 +924,130 @@ function saveResult() {
   renderPersonalBest();
 }
 
-async function shareResult() {
-  if (!lastResult) return;
-  const r = lastResult;
+function shareText(r) {
   const five = r.lineup
     .map((s) => `${s.pos}: ${s.name} (${s.abbr} ${s.decade})`)
     .join("\n");
-  const text =
+  return (
     `82-0 · Built for Dion Kontonis\n` +
     `${state.user}'s season: ${r.wins}–${r.losses} (Grade ${r.grade}, strength ${r.strength}/100)\n\n` +
-    `${five}\n\nPlay: https://emailcleaner-olive.vercel.app`;
+    `${five}\n\nPlay: https://emailcleaner-olive.vercel.app`
+  );
+}
+
+function drawShareCanvas(r) {
+  const W = 1080, H = 1080;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d");
+  const perfect = r.wins === 82;
+
+  const g = x.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#141d2e");
+  g.addColorStop(1, "#090c14");
+  x.fillStyle = g;
+  x.fillRect(0, 0, W, H);
+  x.fillStyle = "#f5b942";
+  x.fillRect(0, 0, W, 12);
+
+  x.textAlign = "center";
+  x.fillStyle = "#ffffff";
+  x.font = "900 140px Archivo, sans-serif";
+  x.fillText("82–0", W / 2, 200);
+  x.fillStyle = "#f5b942";
+  x.font = "700 34px Inter, sans-serif";
+  x.fillText("Built for Dion Kontonis", W / 2, 250);
+  x.fillStyle = "#8b95a9";
+  x.font = "600 28px Inter, sans-serif";
+  const modeLabel = state.daily
+    ? "Daily Challenge"
+    : state.mode === "hoopiq"
+    ? "Hoop IQ"
+    : "Classic";
+  x.fillText(`${state.user} · ${modeLabel}`, W / 2, 312);
+
+  // Record, with wins/losses colored.
+  x.font = "900 170px Archivo, sans-serif";
+  const wT = String(r.wins), dT = " – ", lT = String(r.losses);
+  const wW = x.measureText(wT).width;
+  const dW = x.measureText(dT).width;
+  const lW = x.measureText(lT).width;
+  let sx = (W - (wW + dW + lW)) / 2;
+  x.textAlign = "left";
+  x.fillStyle = perfect ? "#f5b942" : "#34d399";
+  x.fillText(wT, sx, 520);
+  sx += wW;
+  x.fillStyle = "#8b95a9";
+  x.fillText(dT, sx, 520);
+  sx += dW;
+  x.fillStyle = perfect ? "#f5b942" : "#f6685e";
+  x.fillText(lT, sx, 520);
+
+  x.textAlign = "center";
+  x.fillStyle = "#eef2f9";
+  x.font = "800 44px Archivo, sans-serif";
+  x.fillText(`Grade ${r.grade} · ${r.strength}/100`, W / 2, 600);
+
+  // Lineup
+  x.font = "600 36px Inter, sans-serif";
+  let y = 700;
+  for (const s of r.lineup) {
+    x.fillStyle = "#f5b942";
+    x.textAlign = "left";
+    x.fillText(s.pos, 150, y);
+    x.fillStyle = "#eef2f9";
+    x.fillText(s.name, 250, y);
+    x.fillStyle = "#8b95a9";
+    x.textAlign = "right";
+    x.fillText(`${s.abbr} · ${s.decade}`, W - 150, y);
+    y += 64;
+  }
+
+  x.textAlign = "center";
+  x.fillStyle = "#5d6678";
+  x.font = "600 26px Inter, sans-serif";
+  x.fillText("emailcleaner-olive.vercel.app", W / 2, 1030);
+  return c;
+}
+
+async function shareResult() {
+  if (!lastResult) return;
+  const r = lastResult;
   try {
-    if (navigator.share) {
-      await navigator.share({ title: "82-0", text });
-    } else {
-      await navigator.clipboard.writeText(text);
-      showShareToast("Result copied to clipboard");
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  } catch {
+    /* fonts API missing — use fallback fonts */
+  }
+  const canvas = drawShareCanvas(r);
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  const file =
+    blob && window.File ? new File([blob], "82-0-result.png", { type: "image/png" }) : null;
+
+  try {
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "82-0", text: shareText(r) });
+      return;
     }
   } catch {
-    /* user dismissed the share sheet — ignore */
+    /* share sheet dismissed */
+    return;
+  }
+
+  // No file sharing — offer a download, and copy the text summary.
+  if (blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "82-0-result.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showShareToast("Image downloaded");
+  }
+  try {
+    await navigator.clipboard.writeText(shareText(r));
+  } catch {
+    /* clipboard unavailable */
   }
 }
 
@@ -949,6 +1157,7 @@ window.addEventListener("DOMContentLoaded", () => {
   renderScoreboard();
   $("#play-classic").addEventListener("click", () => startSolo("classic"));
   $("#play-hoopiq").addEventListener("click", () => startSolo("hoopiq"));
+  $("#play-daily").addEventListener("click", startDaily);
   $("#play-h2h").addEventListener("click", startH2H);
   $("#user-toggle").addEventListener("click", (e) => {
     const b = e.target.closest(".utog");

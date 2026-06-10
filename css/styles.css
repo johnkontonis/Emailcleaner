@@ -1309,6 +1309,14 @@ body {
   color: var(--ink);
 }
 
+.daily-btn {
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.daily-btn .mode-title {
+  color: var(--good);
+}
+
 .h2h-btn {
   width: 100%;
   flex-direction: column;
