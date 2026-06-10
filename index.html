@@ -57,16 +57,34 @@
           him in. Five rounds, five positions, five different eras. Build a
           lineup good enough to go <strong>undefeated</strong>.
         </p>
-        <div class="mode-buttons">
-          <button id="play-classic" class="mode-btn primary">
-            <span class="mode-title">Classic</span>
-            <span class="mode-sub">Career stats shown</span>
-          </button>
-          <button id="play-hoopiq" class="mode-btn">
-            <span class="mode-title">Hoop IQ</span>
-            <span class="mode-sub">Stats hidden — go by knowledge</span>
+        <div class="scoreboard" id="scoreboard"></div>
+
+        <div class="play-section">
+          <div class="section-head">Play solo as</div>
+          <div class="user-toggle" id="user-toggle">
+            <button class="utog active" data-user="Dion">Dion</button>
+            <button class="utog" data-user="John">John</button>
+          </div>
+          <div class="mode-buttons">
+            <button id="play-classic" class="mode-btn primary">
+              <span class="mode-title">Classic</span>
+              <span class="mode-sub">Career stats shown</span>
+            </button>
+            <button id="play-hoopiq" class="mode-btn">
+              <span class="mode-title">Hoop IQ</span>
+              <span class="mode-sub">Stats hidden — go by knowledge</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="play-section">
+          <div class="section-head">Two players</div>
+          <button id="play-h2h" class="mode-btn h2h-btn">
+            <span class="mode-title">Head-to-Head — Dion vs John</span>
+            <span class="mode-sub">Each builds a lineup; the better team wins</span>
           </button>
         </div>
+
         <details class="how-to">
           <summary>How to play</summary>
           <ul>
@@ -88,6 +106,7 @@
           <span class="brand-sub">Built for Dion Kontonis</span>
         </div>
         <div class="topbar-right">
+          <span id="builder-badge" class="badge builder hidden"></span>
           <span id="mode-badge" class="badge">Classic</span>
           <span id="round-indicator" class="round">Round 1 / 5</span>
         </div>
@@ -190,6 +209,35 @@
           <button id="share-result" class="action-btn">Share</button>
         </div>
         <button id="play-again" class="action-btn primary play-again">Play again</button>
+      </div>
+    </section>
+
+    <!-- HANDOFF (pass the device) -->
+    <section id="handoff-screen" class="screen hidden">
+      <div class="handoff-card">
+        <div id="handoff-check" class="handoff-check">✓</div>
+        <h2 id="handoff-title" class="handoff-title"></h2>
+        <p id="handoff-sub" class="handoff-sub"></p>
+        <button id="handoff-continue" class="action-btn primary"></button>
+      </div>
+    </section>
+
+    <!-- HEAD-TO-HEAD RESULT -->
+    <section id="h2h-result-screen" class="screen hidden">
+      <div class="h2h-card">
+        <p class="result-label">Head-to-head result</p>
+        <h2 id="h2h-winner" class="h2h-winner"></h2>
+        <p id="h2h-blurb" class="result-blurb"></p>
+        <div class="h2h-grid">
+          <div class="h2h-side" id="h2h-side-0"></div>
+          <div class="h2h-vs">VS</div>
+          <div class="h2h-side" id="h2h-side-1"></div>
+        </div>
+        <div id="h2h-series" class="h2h-series"></div>
+        <div class="result-actions">
+          <button id="h2h-again" class="action-btn save">Rematch</button>
+          <button id="h2h-home" class="action-btn">Home</button>
+        </div>
       </div>
     </section>
 

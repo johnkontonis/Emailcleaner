@@ -1118,6 +1118,347 @@ body {
   transform: translateY(-1px);
 }
 
+/* ------------------------------ Scoreboard ------------------------------ */
+.scoreboard {
+  margin: 4px auto 30px;
+  max-width: 440px;
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  padding: 18px 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.sb-title {
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.sb-h2h {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 8px 0 2px;
+}
+
+.sb-name {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.sb-name.dion,
+.sb-dot.dion,
+.dion {
+  color: var(--info);
+}
+
+.sb-name.john,
+.sb-dot.john,
+.john {
+  color: var(--accent);
+}
+
+.sb-score {
+  font-family: var(--display);
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -1px;
+}
+
+.sb-dash {
+  color: var(--muted);
+  margin: 0 8px;
+}
+
+.sb-sub {
+  font-size: 12px;
+  color: var(--faint);
+  margin-bottom: 12px;
+}
+
+.sb-bests {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.sb-bests b {
+  color: var(--text);
+}
+
+.sb-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 7px;
+}
+
+/* ------------------------- Play sections / toggle ----------------------- */
+.play-section {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto 22px;
+}
+
+.section-head {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.user-toggle {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: 14px;
+}
+
+.utog {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 15px;
+  padding: 8px 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.13s ease;
+}
+
+.utog:hover {
+  color: var(--text);
+}
+
+.utog.active {
+  background: var(--accent);
+  color: var(--ink);
+}
+
+.h2h-btn {
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: linear-gradient(135deg, #243042 0%, #1a2130 100%);
+  border-color: rgba(76, 194, 255, 0.35);
+}
+
+.h2h-btn:hover {
+  border-color: var(--info);
+}
+
+.badge.builder {
+  background: rgba(76, 194, 255, 0.12);
+  border-color: rgba(76, 194, 255, 0.4);
+  color: var(--info);
+}
+
+/* ------------------------------- Handoff -------------------------------- */
+.handoff-card {
+  max-width: 460px;
+  margin: 12vh auto 0;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: 40px 30px;
+  box-shadow: var(--shadow-lg);
+}
+
+.handoff-check {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: rgba(52, 211, 153, 0.15);
+  border: 2px solid var(--good);
+  color: var(--good);
+  font-size: 32px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handoff-title {
+  font-family: var(--display);
+  font-size: 26px;
+  margin: 0 0 8px;
+}
+
+.handoff-sub {
+  color: var(--muted);
+  margin: 0 0 26px;
+  font-size: 15px;
+}
+
+/* --------------------------- Head-to-head result ------------------------ */
+.h2h-card {
+  max-width: 720px;
+  margin: 4vh auto 0;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  padding: 30px 26px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.h2h-winner {
+  font-family: var(--display);
+  font-size: 40px;
+  font-weight: 900;
+  margin: 6px 0 4px;
+  letter-spacing: -1px;
+}
+
+.h2h-winner.win-dion {
+  color: var(--info);
+}
+
+.h2h-winner.win-john {
+  color: var(--accent);
+}
+
+.h2h-winner.tie {
+  color: var(--text);
+}
+
+.h2h-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 14px;
+  align-items: stretch;
+  margin: 18px 0;
+}
+
+.h2h-vs {
+  align-self: center;
+  font-family: var(--display);
+  font-weight: 900;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.h2h-side {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 16px 14px;
+  text-align: left;
+}
+
+.h2h-side.winner {
+  border-color: var(--good);
+  box-shadow: 0 0 0 1px var(--good), var(--shadow);
+}
+
+.h2h-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.h2h-user {
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: 20px;
+}
+
+.h2h-record {
+  font-family: var(--display);
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: -2px;
+  line-height: 1.1;
+  margin-top: 6px;
+}
+
+.h2h-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.h2h-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.h2h-cat {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  padding: 3px 7px;
+  border-radius: 6px;
+}
+
+.h2h-cat.won {
+  color: var(--good);
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.h2h-lineup {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.h2h-lineup li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+
+.h2h-lineup .rl-meta {
+  margin-left: auto;
+}
+
+.h2h-series {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 8px 0 20px;
+}
+
+.h2h-series b {
+  font-family: var(--display);
+}
+
+@media (max-width: 600px) {
+  .h2h-grid {
+    grid-template-columns: 1fr;
+  }
+  .h2h-vs {
+    padding: 4px 0;
+  }
+}
+
 /* ------------------------------ Confetti -------------------------------- */
 .confetti-layer {
   position: fixed;

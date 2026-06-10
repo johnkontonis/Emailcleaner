@@ -32,6 +32,8 @@ const state = {
   filter: "", // roster search text
   posFilter: "ALL", // PG/SG/SF/PF/C or ALL
   sort: "ppg", // ppg/rpg/apg/spg/bpg/name
+  user: "Dion", // active solo user
+  h2h: null, // head-to-head session, when active
 };
 
 // ---- DOM helpers -----------------------------------------------------------
@@ -445,9 +447,41 @@ async function eraSkip() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function snapshotLineup() {
+  return POSITIONS.map((pos) => {
+    const s = state.lineup[pos];
+    const meta = teamMeta(s.team);
+    return {
+      pos,
+      name: s.player.name,
+      team: s.team,
+      abbr: meta.abbr,
+      decade: s.decade,
+    };
+  });
+}
+
 function finishGame() {
   const result = simulate(state.lineup);
-  showResult(result);
+  if (state.h2h) {
+    const who = state.h2h.builder;
+    state.h2h.results[who] = {
+      wins: result.wins,
+      losses: result.losses,
+      grade: result.grade,
+      strength: Math.round(result.strength * 100),
+      totals: result.totals,
+      lineup: snapshotLineup(),
+    };
+    if (who === "Dion") {
+      state.h2h.builder = "John";
+      showHandoff("Dion");
+    } else {
+      showH2HResult();
+    }
+  } else {
+    showResult(result);
+  }
 }
 
 // ---- Result screen ---------------------------------------------------------
@@ -531,7 +565,7 @@ function renderRatingBars(r) {
 }
 
 // ---- Start / reset ---------------------------------------------------------
-async function startGame(mode) {
+function resetBuildState(mode) {
   state.mode = mode;
   state.round = 0;
   state.lineup = {};
@@ -539,14 +573,38 @@ async function startGame(mode) {
   state.current = null;
   state.skips = { team: 1, era: 1 };
   state.spinning = false;
+}
 
+async function beginBuild() {
   $("#start-screen").classList.add("hidden");
   $("#result-screen").classList.add("hidden");
+  $("#handoff-screen").classList.add("hidden");
+  $("#h2h-result-screen").classList.add("hidden");
   $("#game-screen").classList.remove("hidden");
-  $("#mode-badge").textContent =
-    mode === "hoopiq" ? "Hoop IQ" : "Classic";
+  $("#mode-badge").textContent = state.mode === "hoopiq" ? "Hoop IQ" : "Classic";
 
+  const bb = $("#builder-badge");
+  if (state.h2h) {
+    bb.classList.remove("hidden");
+    bb.textContent = `${state.h2h.builder} building`;
+  } else {
+    bb.classList.add("hidden");
+  }
   await nextRound();
+}
+
+// Solo game, attributed to the selected user.
+async function startSolo(mode) {
+  state.h2h = null;
+  resetBuildState(mode);
+  await beginBuild();
+}
+
+// Two-player head-to-head: Dion builds, then John, then compare.
+async function startH2H() {
+  state.h2h = { builder: "Dion", results: {} };
+  resetBuildState("classic");
+  await beginBuild();
 }
 
 let rollNoteTimer = null;
@@ -578,9 +636,13 @@ function resetRosterControls() {
 }
 
 function backToStart() {
+  state.h2h = null;
   $("#result-screen").classList.add("hidden");
+  $("#h2h-result-screen").classList.add("hidden");
+  $("#handoff-screen").classList.add("hidden");
   $("#game-screen").classList.add("hidden");
   $("#start-screen").classList.remove("hidden");
+  renderScoreboard();
 }
 
 // ---- Celebration (scales with the record) ----------------------------------
@@ -651,43 +713,91 @@ function firework(layer, xVw, yVh) {
   setTimeout(() => burst.remove(), 1300);
 }
 
-// ---- Saving / sharing your record ------------------------------------------
-const RECORDS_KEY = "eighty2_records_v1";
+// ---- Store: per-user records + head-to-head series -------------------------
+const STORE_KEY = "eighty2_store_v1";
+const USERS = ["Dion", "John"];
 
-function loadRecords() {
+function loadStore() {
+  let s = null;
   try {
-    return JSON.parse(localStorage.getItem(RECORDS_KEY)) || [];
+    s = JSON.parse(localStorage.getItem(STORE_KEY));
   } catch {
-    return [];
+    s = null;
+  }
+  if (!s || typeof s !== "object") s = {};
+  s.Dion = s.Dion || [];
+  s.John = s.John || [];
+  s.h2h = s.h2h || [];
+  return s;
+}
+
+function saveStore(s) {
+  try {
+    s.Dion = s.Dion.slice(-200);
+    s.John = s.John.slice(-200);
+    s.h2h = s.h2h.slice(-200);
+    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+  } catch {
+    /* storage may be unavailable (private mode) — fail quietly */
   }
 }
 
-function bestRecord() {
-  const recs = loadRecords();
+function bestFor(user) {
+  const recs = loadStore()[user] || [];
   if (!recs.length) return null;
   return recs.reduce((a, b) => (b.wins > a.wins ? b : a));
 }
 
-function renderPersonalBest() {
-  const best = bestRecord();
-  const node = $("#personal-best");
-  if (!best) {
-    node.classList.add("hidden");
-    return;
+function h2hTally() {
+  const recs = loadStore().h2h;
+  const t = { Dion: 0, John: 0, ties: 0 };
+  for (const r of recs) {
+    if (r.winner === "tie") t.ties += 1;
+    else t[r.winner] += 1;
   }
+  return t;
+}
+
+// ---- Start-screen scoreboard ------------------------------------------------
+function renderScoreboard() {
+  const t = h2hTally();
+  const db = bestFor("Dion");
+  const jb = bestFor("John");
+  const best = (b) => (b ? `${b.wins}–${b.losses} (${b.grade})` : "—");
+  $("#scoreboard").innerHTML = `
+    <div class="sb-title">Head-to-head series</div>
+    <div class="sb-h2h">
+      <span class="sb-name dion">Dion</span>
+      <span class="sb-score">${t.Dion}<span class="sb-dash">–</span>${t.John}</span>
+      <span class="sb-name john">John</span>
+    </div>
+    <div class="sb-sub">${
+      t.Dion + t.John + t.ties === 0
+        ? "No matchups yet — play Head-to-Head"
+        : `${t.Dion + t.John + t.ties} played${t.ties ? ` · ${t.ties} tied` : ""}`
+    }</div>
+    <div class="sb-bests">
+      <div><span class="sb-dot dion"></span>Dion best <b>${best(db)}</b></div>
+      <div><span class="sb-dot john"></span>John best <b>${best(jb)}</b></div>
+    </div>`;
+}
+
+// ---- Solo: record + share ---------------------------------------------------
+function renderPersonalBest() {
+  const best = bestFor(state.user);
+  const node = $("#personal-best");
+  const count = (loadStore()[state.user] || []).length;
   node.classList.remove("hidden");
-  node.innerHTML = `Personal best &nbsp;<b>${best.wins}–${best.losses}</b>&nbsp; (${best.grade}) · ${loadRecords().length} recorded`;
+  node.innerHTML = best
+    ? `${state.user}'s best &nbsp;<b>${best.wins}–${best.losses}</b>&nbsp; (${best.grade}) · ${count} recorded`
+    : `${state.user} has no recorded seasons yet`;
 }
 
 function saveResult() {
   if (!lastResult) return;
-  const recs = loadRecords();
-  recs.push(lastResult);
-  try {
-    localStorage.setItem(RECORDS_KEY, JSON.stringify(recs.slice(-200)));
-  } catch {
-    /* storage may be unavailable (private mode) — fail quietly */
-  }
+  const store = loadStore();
+  store[state.user].push(lastResult);
+  saveStore(store);
   const btn = $("#save-result");
   btn.textContent = "✓ Recorded";
   btn.disabled = true;
@@ -702,7 +812,7 @@ async function shareResult() {
     .join("\n");
   const text =
     `82-0 · Built for Dion Kontonis\n` +
-    `My season: ${r.wins}–${r.losses} (Grade ${r.grade}, strength ${r.strength}/100)\n\n` +
+    `${state.user}'s season: ${r.wins}–${r.losses} (Grade ${r.grade}, strength ${r.strength}/100)\n\n` +
     `${five}\n\nPlay: https://emailcleaner-olive.vercel.app`;
   try {
     if (navigator.share) {
@@ -723,10 +833,117 @@ function showShareToast(msg) {
   setTimeout(() => (btn.textContent = original), 1800);
 }
 
+// ---- Head-to-head: handoff + result ----------------------------------------
+function showHandoff(justFinished) {
+  $("#game-screen").classList.add("hidden");
+  const next = state.h2h.builder;
+  $("#handoff-title").textContent = `${justFinished}'s team is locked in`;
+  $("#handoff-sub").textContent = `Pass the device to ${next} — no peeking at the picks!`;
+  $("#handoff-continue").textContent = `${next}, build your team →`;
+  $("#handoff-screen").classList.remove("hidden");
+}
+
+function handoffContinue() {
+  resetBuildState("classic");
+  beginBuild();
+}
+
+const CATS = [
+  ["ppg", "PTS"],
+  ["rpg", "REB"],
+  ["apg", "AST"],
+  ["spg", "STL"],
+  ["bpg", "BLK"],
+];
+
+function showH2HResult() {
+  const d = state.h2h.results.Dion;
+  const j = state.h2h.results.John;
+
+  let winner;
+  if (d.wins !== j.wins) winner = d.wins > j.wins ? "Dion" : "John";
+  else if (d.strength !== j.strength)
+    winner = d.strength > j.strength ? "Dion" : "John";
+  else winner = "tie";
+
+  // Persist the matchup and add each lineup to its user's history.
+  const store = loadStore();
+  store.h2h.push({
+    winner,
+    Dion: { wins: d.wins, losses: d.losses, grade: d.grade, strength: d.strength },
+    John: { wins: j.wins, losses: j.losses, grade: j.grade, strength: j.strength },
+    date: new Date().toISOString(),
+  });
+  store.Dion.push({ ...d, mode: "h2h", date: new Date().toISOString() });
+  store.John.push({ ...j, mode: "h2h", date: new Date().toISOString() });
+  saveStore(store);
+
+  $("#game-screen").classList.add("hidden");
+  $("#handoff-screen").classList.add("hidden");
+  $("#h2h-result-screen").classList.remove("hidden");
+
+  $("#h2h-winner").textContent =
+    winner === "tie" ? "It's a tie!" : `${winner} wins!`;
+  $("#h2h-winner").className =
+    "h2h-winner" + (winner === "tie" ? " tie" : ` win-${winner.toLowerCase()}`);
+  $("#h2h-blurb").textContent =
+    winner === "tie"
+      ? "Dead even — identical projected records and strength."
+      : `${winner}'s lineup projects to the better season.`;
+
+  renderH2HSide($("#h2h-side-0"), "Dion", d, j, winner);
+  renderH2HSide($("#h2h-side-1"), "John", j, d, winner);
+
+  const t = h2hTally();
+  $("#h2h-series").innerHTML =
+    `Series so far &nbsp; <b class="dion">Dion ${t.Dion}</b> — <b class="john">${t.John} John</b>` +
+    (t.ties ? ` · ${t.ties} tied` : "");
+
+  const wins = winner === "Dion" ? d.wins : winner === "John" ? j.wins : 0;
+  launchCelebration(wins);
+}
+
+function renderH2HSide(node, name, me, opp, winner) {
+  const isWinner = winner === name;
+  const cats = CATS.map(([k, abbr]) => {
+    const win = me.totals[k] > opp.totals[k];
+    return `<span class="h2h-cat ${win ? "won" : ""}">${abbr} ${me.totals[k].toFixed(1)}</span>`;
+  }).join("");
+  const lineup = me.lineup
+    .map(
+      (s) =>
+        `<li><span class="rl-pos">${s.pos}</span> ${s.name} <span class="rl-meta">${s.abbr}·${s.decade}</span></li>`
+    )
+    .join("");
+  node.className = "h2h-side" + (isWinner ? " winner" : "");
+  node.innerHTML = `
+    <div class="h2h-head">
+      <span class="h2h-user ${name.toLowerCase()}">${name}</span>
+      ${isWinner ? '<span class="h2h-crown">👑</span>' : ""}
+    </div>
+    <div class="h2h-record"><span class="rec-w">${me.wins}</span><span class="rec-dash">–</span><span class="rec-l">${me.losses}</span></div>
+    <div class="h2h-meta">Grade ${me.grade} · strength ${me.strength}/100</div>
+    <div class="h2h-cats">${cats}</div>
+    <ul class="h2h-lineup">${lineup}</ul>`;
+}
+
 // ---- Wire up ---------------------------------------------------------------
 window.addEventListener("DOMContentLoaded", () => {
-  $("#play-classic").addEventListener("click", () => startGame("classic"));
-  $("#play-hoopiq").addEventListener("click", () => startGame("hoopiq"));
+  renderScoreboard();
+  $("#play-classic").addEventListener("click", () => startSolo("classic"));
+  $("#play-hoopiq").addEventListener("click", () => startSolo("hoopiq"));
+  $("#play-h2h").addEventListener("click", startH2H);
+  $("#user-toggle").addEventListener("click", (e) => {
+    const b = e.target.closest(".utog");
+    if (!b) return;
+    state.user = b.dataset.user;
+    for (const c of $("#user-toggle").children) {
+      c.classList.toggle("active", c === b);
+    }
+  });
+  $("#handoff-continue").addEventListener("click", handoffContinue);
+  $("#h2h-again").addEventListener("click", startH2H);
+  $("#h2h-home").addEventListener("click", backToStart);
   $("#team-skip").addEventListener("click", teamSkip);
   $("#era-skip").addEventListener("click", eraSkip);
   $("#play-again").addEventListener("click", backToStart);
