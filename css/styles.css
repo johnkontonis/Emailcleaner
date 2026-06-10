@@ -62,6 +62,13 @@ body {
   padding: 26px 20px 72px;
 }
 
+/* When launched from the iPad/iPhone home screen, clear the status bar. */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
 .hidden {
   display: none !important;
 }
