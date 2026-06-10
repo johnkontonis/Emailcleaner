@@ -40,6 +40,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SEED = ROOT / "data" / "curated_seed.json"
 OUT = ROOT / "js" / "data.js"
+
+# Don't serve a team-decade with fewer than this many players.
+MIN_ROSTER = 10
+
 CSV_URL = (
     "https://raw.githubusercontent.com/fivethirtyeight/"
     "nba-player-advanced-metrics/master/nba-data-historical.csv"
@@ -380,6 +384,17 @@ def main():
     seed = json.loads(SEED.read_text(encoding="utf-8")) if SEED.exists() else {}
     added = merge_curated(rosters, seed)
     print(f"Merged {added} curated players into the gaps")
+
+    # Drop team-decade combos that are too thin to be fun to roll. This also
+    # clears redundant historical-name duplicates (e.g. a sparse "Seattle
+    # SuperSonics" alongside the deep "Oklahoma City Thunder" franchise).
+    dropped = 0
+    for decade in list(rosters.keys()):
+        for team in list(rosters[decade].keys()):
+            if len(rosters[decade][team]) < MIN_ROSTER:
+                del rosters[decade][team]
+                dropped += 1
+    print(f"Dropped {dropped} combos with fewer than {MIN_ROSTER} players")
 
     text, total = emit_js(rosters)
     combos = sum(len(t) for t in rosters.values())
