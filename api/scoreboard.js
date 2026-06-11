@@ -10,7 +10,7 @@
  */
 const URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const KEY = "scoreboard:v2";
+const KEY = "scoreboard:v3";
 
 async function redis(cmd) {
   const r = await fetch(URL, {
