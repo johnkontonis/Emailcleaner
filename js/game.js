@@ -145,15 +145,18 @@ function simulate(lineup) {
 
   // Map strength onto a 0..82 win curve. Anchored to measured play:
   // a throw-together lineup (strength ~0.37) lands ~10 wins, a balanced
-  // effort (~0.61) ~.500, a strong roster (~0.84) ~70, and only a near-elite
-  // team (~0.93+) approaches a clean sheet.
+  // effort (~0.61) ~.500, a strong roster (~0.84) ~70.
   const t = clamp((strength - 0.297) / 0.635, 0, 1);
   let wins = Math.round(82 * t);
 
-  // A perfect season only if the team is elite across the board, not just on
-  // average — every category must clear the elite bar.
-  const balanced = Object.values(catScore).every((v) => v >= 1.0);
-  if (balanced && strength >= 0.95) wins = 82;
+  // The curve alone never hands out a clean sheet — a dominant team tops out
+  // at 81-1. A perfect 82-0 is reserved for a genuinely elite, well-rounded
+  // roster (solid in every category), which is only ~2% of even optimal
+  // lineups, so it stays a rare achievement.
+  if (wins >= 82) wins = 81;
+  const dominant =
+    Object.values(catScore).every((v) => v >= 0.9) && strength >= 1.02;
+  if (dominant) wins = 82;
   wins = clamp(wins, 0, 82);
   const losses = 82 - wins;
 
