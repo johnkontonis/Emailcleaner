@@ -150,12 +150,12 @@ function simulate(lineup) {
   let wins = Math.round(82 * t);
 
   // The curve alone never hands out a clean sheet — a dominant team tops out
-  // at 81-1. A perfect 82-0 is reserved for a genuinely elite, well-rounded
-  // roster (solid in every category), which is only ~2% of even optimal
-  // lineups, so it stays a rare achievement.
+  // at 81-1. A perfect 82-0 is reserved for a strong, well-rounded roster
+  // (every category >= 0.8x the elite bar and overall strength >= 0.95) — about
+  // 9% of optimal lineups, near-zero for casual play.
   if (wins >= 82) wins = 81;
   const dominant =
-    Object.values(catScore).every((v) => v >= 0.9) && strength >= 1.02;
+    Object.values(catScore).every((v) => v >= 0.8) && strength >= 0.95;
   if (dominant) wins = 82;
   wins = clamp(wins, 0, 82);
   const losses = 82 - wins;
