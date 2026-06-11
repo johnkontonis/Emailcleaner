@@ -9,9 +9,10 @@
 
 const TOTAL_ROUNDS = 5;
 
-// Reference totals a 5-man starting lineup would need to be "elite" in each
-// category. Used to normalize the roster's combined stats into a strength.
-const ELITE = { ppg: 130, rpg: 50, apg: 32, spg: 8.5, bpg: 7.5 };
+// Combined 5-man totals that represent an "elite" lineup in each category
+// (catScore = 1.0). Anchored to the best totals actually reachable from the
+// full dataset, so a strong roster scores like one — not an automatic tank.
+const ELITE = { ppg: 120, rpg: 50, apg: 28, spg: 7.5, bpg: 6.5 };
 const CATEGORY_LABELS = {
   ppg: "Scoring",
   rpg: "Rebounding",
@@ -28,6 +29,12 @@ const state = {
   current: null, // { decade, team, roster }
   skips: { team: 1, era: 1 },
   spinning: false,
+  filter: "", // roster search text
+  posFilter: "ALL", // PG/SG/SF/PF/C or ALL
+  sort: "ppg", // ppg/rpg/apg/spg/bpg/name
+  user: "Dion", // active solo user
+  h2h: null, // head-to-head session, when active
+  daily: null, // { date, teams: [{decade, team}] } for the daily challenge
 };
 
 // ---- DOM helpers -----------------------------------------------------------
@@ -59,8 +66,47 @@ function rosterCanFill(roster, open) {
   return roster.some((pl) => pl.pos.some((p) => open.includes(p)));
 }
 
-async function newRoll({ decade, excludeTeam } = {}) {
+// Unused decades (excluding the current one) where `team` has a playable
+// roster — used by an era skip to keep the team and change only the era.
+async function teamDecades(team, open) {
+  const all = await DataProvider.getDecades();
+  const out = [];
+  for (const d of all) {
+    if (state.usedDecades.includes(d)) continue;
+    if (state.current && d === state.current.decade) continue;
+    const roster = await DataProvider.getRoster(d, team);
+    if (roster.length && (!open || rosterCanFill(roster, open))) out.push(d);
+  }
+  return out;
+}
+
+// Roll a team + decade. Lock behavior:
+//   { decade }            -> team skip: keep the era, change the team
+//   { team }              -> era skip: keep the team, change the era
+//   {}                    -> fresh round: both random
+async function newRoll({ decade, team, excludeTeam } = {}) {
   const open = openPositions();
+
+  // Daily challenge: the five teams are fixed and shared by everyone today.
+  if (state.daily) {
+    const preset = state.daily.teams[state.round - 1];
+    const roster = await DataProvider.getRoster(preset.decade, preset.team);
+    state.current = { decade: preset.decade, team: preset.team, roster };
+    return state.current;
+  }
+
+  // Era skip: keep the team, move it to a different unused era.
+  if (team) {
+    const decs = await teamDecades(team, open);
+    if (decs.length) {
+      const d = pick(decs);
+      const roster = await DataProvider.getRoster(d, team);
+      state.current = { decade: d, team, roster };
+      return state.current;
+    }
+    // No other era has this team — fall through to a normal roll.
+  }
+
   // Try to land on a roll that can actually fill an open slot, so the game
   // never deadlocks when skips are gone. Fall back to whatever we last rolled
   // if (somehow) nothing qualifies after a bounded search.
@@ -97,14 +143,20 @@ function simulate(lineup) {
   let strength = 0;
   for (const k of Object.keys(weights)) strength += catScore[k] * weights[k];
 
-  // Map strength (~0.45 floor .. ~1.15 ceiling) onto a 0..82 win curve.
-  const t = clamp((strength - 0.5) / (1.12 - 0.5), 0, 1);
-  let wins = Math.round(82 * easeInOutCubic(t));
+  // Map strength onto a 0..82 win curve. Anchored to measured play:
+  // a throw-together lineup (strength ~0.37) lands ~10 wins, a balanced
+  // effort (~0.61) ~.500, a strong roster (~0.84) ~70.
+  const t = clamp((strength - 0.297) / 0.635, 0, 1);
+  let wins = Math.round(82 * t);
 
-  // A perfect season only if the team is elite across the board, not just on
-  // average — every category must clear the elite bar.
-  const balanced = Object.values(catScore).every((v) => v >= 1.0);
-  if (balanced && strength >= 1.05) wins = 82;
+  // The curve alone never hands out a clean sheet — a dominant team tops out
+  // at 81-1. A perfect 82-0 is reserved for a strong, well-rounded roster
+  // (every category >= 0.8x the elite bar and overall strength >= 0.95) — about
+  // 9% of optimal lineups, near-zero for casual play.
+  if (wins >= 82) wins = 81;
+  const dominant =
+    Object.values(catScore).every((v) => v >= 0.8) && strength >= 0.95;
+  if (dominant) wins = 82;
   wins = clamp(wins, 0, 82);
   const losses = 82 - wins;
 
@@ -129,6 +181,7 @@ function simulate(lineup) {
     weakness: CATEGORY_LABELS[weakKey],
     totals,
     catScore,
+    strength,
   };
 }
 
@@ -153,14 +206,27 @@ function blurbFor(w) {
 }
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 // ---- Rendering -------------------------------------------------------------
 function render() {
   renderCourt();
   renderStatus();
+  renderNeeds();
   renderRoster();
+}
+
+// Open-position tracker in the pinned panel, so you always know what you still
+// need to fill while scrolling the roster.
+function renderNeeds() {
+  const node = $("#sm-needs");
+  if (!node) return;
+  const open = openPositions();
+  node.innerHTML =
+    `<span class="sm-needs-label">Still need</span>` +
+    POSITIONS.map((pos) => {
+      const filled = !open.includes(pos);
+      return `<span class="need ${filled ? "done" : "open"}">${pos}${filled ? " ✓" : ""}</span>`;
+    }).join("");
 }
 
 function openPositions() {
@@ -176,11 +242,17 @@ function renderCourt() {
     const label = el("div", "slot-pos", pos);
     node.appendChild(label);
     if (slot) {
+      const meta = teamMeta(slot.team);
+      node.style.borderColor = meta.c1;
+      node.style.background = `linear-gradient(180deg, ${hexA(meta.c1, 0.32)} 0%, rgba(0,0,0,0.25) 100%)`;
+      node.appendChild(el("div", "slot-logo", teamBadgeHTML(meta)));
       node.appendChild(el("div", "slot-name", slot.player.name));
       node.appendChild(
-        el("div", "slot-meta", `${slot.team} · ${slot.decade}`)
+        el("div", "slot-meta", `${meta.abbr} · ${slot.decade}`)
       );
     } else {
+      node.style.borderColor = "";
+      node.style.background = "";
       node.appendChild(el("div", "slot-empty", POSITION_NAMES[pos]));
     }
     wrap.appendChild(node);
@@ -192,10 +264,14 @@ function renderStatus() {
     state.round > TOTAL_ROUNDS
       ? "Season locked in"
       : `Round ${state.round} / ${TOTAL_ROUNDS}`;
+  // Skips are off in the daily challenge so everyone faces the same five teams.
+  const daily = !!state.daily;
+  const skips = $("#skips");
+  if (skips) skips.style.display = daily ? "none" : "";
   $("#team-skip").textContent = `Team skip (${state.skips.team})`;
   $("#era-skip").textContent = `Era skip (${state.skips.era})`;
-  $("#team-skip").disabled = state.skips.team <= 0 || state.spinning;
-  $("#era-skip").disabled = state.skips.era <= 0 || state.spinning;
+  $("#team-skip").disabled = daily || state.skips.team <= 0 || state.spinning;
+  $("#era-skip").disabled = daily || state.skips.era <= 0 || state.spinning;
 }
 
 function statLine(pl) {
@@ -211,21 +287,56 @@ function statLine(pl) {
 }
 
 function renderRoster() {
-  const reel = $("#reel-team");
   const list = $("#roster-list");
   list.innerHTML = "";
 
   if (!state.current || state.round > TOTAL_ROUNDS) {
-    reel.textContent = "—";
+    const text = $("#reel-text");
+    if (text) text.textContent = "—";
     return;
   }
 
-  reel.innerHTML = `<span class="reel-decade">${state.current.decade}</span> <span class="reel-name">${state.current.team}</span>`;
+  setReel(state.current.decade, state.current.team);
+  const meta = teamMeta(state.current.team);
 
   const open = openPositions();
-  for (const pl of state.current.roster) {
+  const q = (state.filter || "").trim().toLowerCase();
+  const posFilter = state.posFilter || "ALL";
+  const sortKey = state.sort || "ppg";
+
+  let roster = state.current.roster.filter(
+    (pl) =>
+      (!q || pl.name.toLowerCase().includes(q)) &&
+      (posFilter === "ALL" || pl.pos.includes(posFilter))
+  );
+
+  // Eligible (fits an open slot) first, then by the chosen sort.
+  const cmp =
+    sortKey === "name"
+      ? (a, b) => a.name.localeCompare(b.name)
+      : (a, b) => b[sortKey] - a[sortKey];
+  roster = roster.slice().sort((a, b) => {
+    const ae = a.pos.some((p) => open.includes(p)) ? 0 : 1;
+    const be = b.pos.some((p) => open.includes(p)) ? 0 : 1;
+    return ae - be || cmp(a, b);
+  });
+
+  const total = state.current.roster.length;
+  const eligibleCount = state.current.roster.filter((pl) =>
+    pl.pos.some((p) => open.includes(p))
+  ).length;
+  const count = $("#roster-count");
+  if (count) {
+    count.textContent =
+      q || posFilter !== "ALL"
+        ? `${roster.length} of ${total} shown`
+        : `${total} players · ${eligibleCount} fit an open slot`;
+  }
+
+  for (const pl of roster) {
     const eligible = pl.pos.filter((p) => open.includes(p));
     const card = el("div", "player-card" + (eligible.length ? "" : " disabled"));
+    card.style.setProperty("--team", meta.c1);
     card.innerHTML = `
       <div class="player-head">
         <span class="player-name">${pl.name}</span>
@@ -268,27 +379,81 @@ async function nextRound() {
     finishGame();
     return;
   }
+  // Fresh roster each round — clear any leftover search / filters.
+  resetRosterControls();
   await spinTo();
   render();
 }
 
-async function spinTo(opts) {
+// Paint the slot-machine reel (and game-screen accent) for a team + decade.
+function setReel(decade, team) {
+  const meta = teamMeta(team);
+  const logo = $("#reel-logo");
+  const text = $("#reel-text");
+  if (text) {
+    text.innerHTML = `<span class="reel-decade">${decade}</span> <span class="reel-name">${team}</span>`;
+  }
+  if (logo) logo.innerHTML = teamBadgeHTML(meta);
+  const sm = $("#slot-machine");
+  if (sm) {
+    sm.style.borderColor = meta.c1;
+    // Tint only the image layer so the panel's solid background stays opaque
+    // (it's sticky — the roster must not show through it).
+    sm.style.backgroundImage = `linear-gradient(100deg, ${hexA(meta.c1, 0.22)} 0%, transparent 55%)`;
+  }
+}
+
+// A small team mark: real logo if available, else a colored initials badge.
+function teamBadgeHTML(meta) {
+  if (meta.logo) {
+    return `<img class="team-logo" src="${meta.logo}" alt=""
+      onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'team-badge',textContent:'${meta.abbr}',style:'background:${meta.c1};color:#fff'}))" />`;
+  }
+  return `<span class="team-badge" style="background:${meta.c1};color:#fff">${meta.abbr}</span>`;
+}
+
+// hex (#rrggbb) -> rgba string at the given alpha.
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.replace(/./g, "$&$&") : h, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+async function spinTo(opts = {}) {
   state.spinning = true;
   renderStatus();
+
+  // Clear the roster while the reel rolls — players leave the screen until the
+  // new team locks in.
+  const list = $("#roster-list");
+  if (list) list.innerHTML = "";
+  const count = $("#roster-count");
+  if (count) count.textContent = "Rolling…";
+
   const reel = $("#reel-team");
   reel.classList.add("spinning");
 
-  // Quick visual shuffle through random combos before locking in.
   const decades = await DataProvider.getDecades();
+  // Honor any lock during the shuffle: a team skip fixes the era, an era skip
+  // fixes the team.
+  const teamLock = opts.team || null;
+  let decadePool = decades;
+  if (teamLock) {
+    decadePool = await teamDecades(teamLock, null);
+    if (!decadePool.length) decadePool = decades;
+  }
+
   const ticks = 12;
   for (let i = 0; i < ticks; i++) {
-    const d = pick(decades);
-    const teams = await DataProvider.getTeams(d);
-    reel.innerHTML = `<span class="reel-decade">${d}</span> <span class="reel-name">${pick(teams)}</span>`;
+    const d = opts.decade || pick(decadePool);
+    const t = teamLock || pick(await DataProvider.getTeams(d));
+    setReel(d, t);
     await sleep(40 + i * 12);
   }
 
   await newRoll(opts);
+  if (state.current) setReel(state.current.decade, state.current.team);
   reel.classList.remove("spinning");
   state.spinning = false;
 }
@@ -296,50 +461,163 @@ async function spinTo(opts) {
 async function teamSkip() {
   if (state.skips.team <= 0 || state.spinning || !state.current) return;
   state.skips.team -= 1;
+  // Keep the era, change the team.
   await spinTo({ decade: state.current.decade, excludeTeam: state.current.team });
   render();
 }
 
 async function eraSkip() {
-  if (state.skips.era <= 0 || state.spinning) return;
+  if (state.skips.era <= 0 || state.spinning || !state.current) return;
   state.skips.era -= 1;
-  await spinTo();
+  const keptTeam = state.current.team;
+  // Keep the team, change the era.
+  await spinTo({ team: keptTeam });
+  if (state.current.team !== keptTeam) {
+    showRollNote(`${keptTeam} has no other open era — rolled a fresh team.`);
+  }
   render();
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function snapshotLineup() {
+  return POSITIONS.map((pos) => {
+    const s = state.lineup[pos];
+    const meta = teamMeta(s.team);
+    return {
+      pos,
+      name: s.player.name,
+      team: s.team,
+      abbr: meta.abbr,
+      decade: s.decade,
+    };
+  });
+}
+
 function finishGame() {
   const result = simulate(state.lineup);
-  showResult(result);
+  if (state.h2h) {
+    const who = state.h2h.builder;
+    state.h2h.results[who] = {
+      wins: result.wins,
+      losses: result.losses,
+      grade: result.grade,
+      strength: Math.round(result.strength * 100),
+      totals: result.totals,
+      lineup: snapshotLineup(),
+    };
+    state.h2h.idx += 1;
+    if (state.h2h.idx < state.h2h.order.length) {
+      state.h2h.builder = state.h2h.order[state.h2h.idx];
+      showHandoff(who);
+    } else {
+      showH2HResult();
+    }
+  } else {
+    if (state.daily) recordDaily(result);
+    showResult(result);
+  }
+}
+
+// Keep each user's best score for today's daily challenge, for comparison.
+function recordDaily(result) {
+  const store = loadStore();
+  store.daily = store.daily || {};
+  const day = (store.daily[state.daily.date] = store.daily[state.daily.date] || {});
+  const prev = day[state.user];
+  if (!prev || result.wins > prev.wins) {
+    day[state.user] = {
+      wins: result.wins,
+      losses: result.losses,
+      grade: result.grade,
+      strength: Math.round(result.strength * 100),
+    };
+  }
+  saveStore(store);
 }
 
 // ---- Result screen ---------------------------------------------------------
+let lastResult = null;
+
 function showResult(r) {
   $("#game-screen").classList.add("hidden");
   const screen = $("#result-screen");
   screen.classList.remove("hidden");
 
   const perfect = r.wins === 82;
-  $("#result-record").textContent = `${r.wins}–${r.losses}`;
-  $("#result-record").className = perfect ? "record perfect" : "record";
+  // Wins green, losses red (or a single gold gradient for a perfect season).
+  const rec = $("#result-record");
+  rec.className = perfect ? "record perfect" : "record";
+  rec.innerHTML = perfect
+    ? `${r.wins}–${r.losses}`
+    : `<span class="rec-w">${r.wins}</span><span class="rec-dash">–</span><span class="rec-l">${r.losses}</span>`;
   $("#result-grade").textContent = r.grade;
   $("#result-blurb").textContent = r.blurb;
 
-  const lineupHtml = POSITIONS.map((pos) => {
+  const lineup = POSITIONS.map((pos) => {
     const s = state.lineup[pos];
-    return `<li><span class="rl-pos">${pos}</span> <span class="rl-name">${s.player.name}</span> <span class="rl-meta">${s.team} · ${s.decade}</span></li>`;
-  }).join("");
-  $("#result-lineup").innerHTML = lineupHtml;
+    const meta = teamMeta(s.team);
+    return { pos, name: s.player.name, team: s.team, abbr: meta.abbr, decade: s.decade };
+  });
+  $("#result-lineup").innerHTML = lineup
+    .map(
+      (s) =>
+        `<li><span class="rl-pos">${s.pos}</span> <span class="rl-name">${s.name}</span> <span class="rl-meta">${s.abbr} · ${s.decade}</span></li>`
+    )
+    .join("");
 
+  renderRatingBars(r);
   $("#result-best").textContent = r.bestPick.name;
   $("#result-weakness").textContent = r.weakness;
 
-  if (perfect) launchConfetti();
+  // Snapshot for saving / sharing.
+  lastResult = {
+    wins: r.wins,
+    losses: r.losses,
+    grade: r.grade,
+    strength: Math.round(r.strength * 100),
+    mode: state.mode,
+    lineup,
+    date: new Date().toISOString(),
+  };
+
+  // Reset the save button and show the standing personal best.
+  const saveBtn = $("#save-result");
+  saveBtn.disabled = false;
+  saveBtn.textContent = "★ Record this result";
+  renderPersonalBest();
+
+  launchCelebration(r.wins);
+}
+
+// Show each category's combined total against the elite bar (catScore).
+function renderRatingBars(r) {
+  const rows = [
+    ["ppg", "Scoring", "PPG"],
+    ["rpg", "Rebounding", "RPG"],
+    ["apg", "Playmaking", "APG"],
+    ["spg", "Steals", "SPG"],
+    ["bpg", "Blocks", "BPG"],
+  ];
+  $("#rating-bars").innerHTML = rows
+    .map(([k, label, abbr]) => {
+      const pct = Math.round(Math.min(r.catScore[k], 1) * 100);
+      const elite = pct >= 100;
+      return `
+        <div class="rb-row">
+          <span class="rb-label">${label}</span>
+          <span class="rb-track">
+            <span class="rb-fill${elite ? " elite" : ""}" style="width:${pct}%"></span>
+          </span>
+          <span class="rb-val">${r.totals[k].toFixed(1)} ${abbr}</span>
+        </div>`;
+    })
+    .join("");
+  $("#rating-value").textContent = `${(r.strength * 100).toFixed(0)} / 100`;
 }
 
 // ---- Start / reset ---------------------------------------------------------
-async function startGame(mode) {
+function resetBuildState(mode) {
   state.mode = mode;
   state.round = 0;
   state.lineup = {};
@@ -347,43 +625,693 @@ async function startGame(mode) {
   state.current = null;
   state.skips = { team: 1, era: 1 };
   state.spinning = false;
+}
 
+async function beginBuild() {
   $("#start-screen").classList.add("hidden");
   $("#result-screen").classList.add("hidden");
+  $("#handoff-screen").classList.add("hidden");
+  $("#h2h-result-screen").classList.add("hidden");
   $("#game-screen").classList.remove("hidden");
-  $("#mode-badge").textContent =
-    mode === "hoopiq" ? "Hoop IQ" : "Classic";
+  $("#mode-badge").textContent = state.mode === "hoopiq" ? "Hoop IQ" : "Classic";
 
+  const bb = $("#builder-badge");
+  if (state.h2h) {
+    bb.classList.remove("hidden");
+    bb.textContent = `${state.h2h.builder} building`;
+  } else {
+    bb.classList.add("hidden");
+  }
   await nextRound();
 }
 
-function backToStart() {
-  $("#result-screen").classList.add("hidden");
-  $("#game-screen").classList.add("hidden");
-  $("#start-screen").classList.remove("hidden");
+// Solo game, attributed to the selected user.
+async function startSolo(mode) {
+  state.h2h = null;
+  state.daily = null;
+  resetBuildState(mode);
+  await beginBuild();
 }
 
-// ---- Confetti (perfect season only) ----------------------------------------
-function launchConfetti() {
+// Two-player head-to-head. Pick the two players, then a coin flip decides who
+// builds first.
+let h2hPick = ["Dion", "John"]; // currently selected two players in the setup
+
+function openH2HSetup() {
+  state.daily = null;
+  state.h2h = null;
+  h2hPick = ["Dion", "John"];
+  hideAllScreens();
+  $("#h2h-setup-screen").classList.remove("hidden");
+  renderH2HSetup();
+}
+
+function renderH2HSetup() {
+  const wrap = $("#h2h-players");
+  wrap.innerHTML = USERS.map(
+    (u) =>
+      `<button class="utog h2h-pick ${u.toLowerCase()} ${h2hPick.includes(u) ? "active" : ""}" data-user="${u}">${u}</button>`
+  ).join("");
+  const ready = h2hPick.length === 2;
+  $("#h2h-start").disabled = !ready;
+  $("#h2h-setup-hint").textContent = ready
+    ? `${h2hPick[0]} vs ${h2hPick[1]} — first to build is decided by coin flip`
+    : "Pick exactly two players";
+}
+
+function toggleH2HPlayer(user) {
+  if (h2hPick.includes(user)) {
+    h2hPick = h2hPick.filter((u) => u !== user);
+  } else {
+    h2hPick.push(user);
+    if (h2hPick.length > 2) h2hPick.shift(); // keep the two most recent
+  }
+  renderH2HSetup();
+}
+
+async function startH2HMatch() {
+  if (h2hPick.length !== 2) return;
+  // Coin flip for build order.
+  const order = Math.random() < 0.5 ? [...h2hPick] : [h2hPick[1], h2hPick[0]];
+  state.daily = null;
+  state.h2h = { order, idx: 0, builder: order[0], results: {} };
+  resetBuildState("classic");
+  await beginBuild();
+}
+
+function hideAllScreens() {
+  for (const id of [
+    "#start-screen",
+    "#game-screen",
+    "#result-screen",
+    "#handoff-screen",
+    "#h2h-result-screen",
+    "#h2h-setup-screen",
+  ]) {
+    const n = $(id);
+    if (n) n.classList.add("hidden");
+  }
+}
+
+// ---- Daily challenge -------------------------------------------------------
+// Deterministic RNG so everyone gets the same five teams on a given day.
+function seededRand(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function todayStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// A team is dead-end-proof for the daily if it can field every position.
+function teamCoversAll(roster) {
+  const cov = new Set();
+  for (const pl of roster) pl.pos.forEach((p) => cov.add(p));
+  return POSITIONS.every((p) => cov.has(p));
+}
+
+async function buildDailyTeams(date) {
+  const rnd = seededRand(parseInt(date.replace(/-/g, ""), 10) || 1);
+  const pickR = (arr) => arr[Math.floor(rnd() * arr.length)];
+  const decades = (await DataProvider.getDecades()).slice();
+  // Seeded shuffle, take five distinct decades.
+  for (let i = decades.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [decades[i], decades[j]] = [decades[j], decades[i]];
+  }
+  const chosen = decades.slice(0, 5);
+  const teams = [];
+  for (const d of chosen) {
+    const names = await DataProvider.getTeams(d);
+    let team = null;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const cand = pickR(names);
+      if (teamCoversAll(await DataProvider.getRoster(d, cand))) {
+        team = cand;
+        break;
+      }
+    }
+    teams.push({ decade: d, team: team || pickR(names) });
+  }
+  return teams;
+}
+
+async function startDaily() {
+  state.h2h = null;
+  const date = todayStamp();
+  state.daily = { date, teams: await buildDailyTeams(date) };
+  resetBuildState("classic");
+  await beginBuild();
+}
+
+let rollNoteTimer = null;
+function showRollNote(msg) {
+  const note = $("#roll-note");
+  if (!note) return;
+  note.textContent = msg;
+  note.classList.remove("hidden");
+  note.classList.add("show");
+  clearTimeout(rollNoteTimer);
+  rollNoteTimer = setTimeout(() => {
+    note.classList.remove("show");
+    setTimeout(() => note.classList.add("hidden"), 300);
+  }, 3200);
+}
+
+function resetRosterControls() {
+  state.filter = "";
+  state.posFilter = "ALL";
+  state.sort = "ppg";
+  const search = $("#roster-search");
+  if (search) search.value = "";
+  const sort = $("#sort-select");
+  if (sort) sort.value = "ppg";
+  const chips = $("#pos-chips");
+  if (chips) {
+    for (const c of chips.children) c.classList.toggle("active", c.dataset.pos === "ALL");
+  }
+}
+
+function backToStart() {
+  state.h2h = null;
+  hideAllScreens();
+  $("#start-screen").classList.remove("hidden");
+  renderScoreboard();
+}
+
+// ---- Celebration (scales with the record) ----------------------------------
+const FX_COLORS = ["#f5b942", "#ffce6b", "#4cc2ff", "#34d399", "#f6685e", "#fff"];
+
+// Tiered: the better the season, the bigger the show.
+function launchCelebration(wins) {
+  if (wins >= 82) {
+    launchConfetti(150);
+    fireworksShow(7, 6); // bursts per wave, waves
+  } else if (wins >= 70) {
+    launchConfetti(90);
+    fireworksShow(5, 3);
+  } else if (wins >= 55) {
+    launchConfetti(60);
+    fireworksShow(3, 2);
+  } else if (wins >= 41) {
+    fireworksShow(2, 1);
+  }
+  // Below .500: no celebration — you've got work to do.
+}
+
+function launchConfetti(n = 90) {
   const c = $("#confetti");
   c.innerHTML = "";
-  const colors = ["#f9d342", "#ff5f6d", "#3ec6ff", "#7ee787", "#fff"];
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < n; i++) {
     const bit = el("div", "confetti-bit");
     bit.style.left = Math.random() * 100 + "vw";
-    bit.style.background = pick(colors);
-    bit.style.animationDelay = Math.random() * 0.8 + "s";
-    bit.style.animationDuration = 1.6 + Math.random() * 1.4 + "s";
+    bit.style.background = pick(FX_COLORS);
+    bit.style.animationDelay = Math.random() * 0.9 + "s";
+    bit.style.animationDuration = 1.6 + Math.random() * 1.6 + "s";
     c.appendChild(bit);
   }
-  setTimeout(() => (c.innerHTML = ""), 4000);
+  setTimeout(() => (c.innerHTML = ""), 4200);
+}
+
+function fireworksShow(burstsPerWave, waves) {
+  const layer = $("#fireworks");
+  let wave = 0;
+  const fire = () => {
+    for (let b = 0; b < burstsPerWave; b++) {
+      setTimeout(
+        () => firework(layer, 12 + Math.random() * 60, 8 + Math.random() * 44),
+        Math.random() * 500
+      );
+    }
+    if (++wave < waves) setTimeout(fire, 650);
+  };
+  fire();
+}
+
+function firework(layer, xVw, yVh) {
+  const color = pick(FX_COLORS);
+  const sparks = 26;
+  const burst = el("div", "fw-burst");
+  burst.style.left = xVw + "vw";
+  burst.style.top = yVh + "vh";
+  for (let i = 0; i < sparks; i++) {
+    const angle = (i / sparks) * Math.PI * 2;
+    const dist = 70 + Math.random() * 60;
+    const s = el("div", "fw-spark");
+    s.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+    s.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
+    s.style.background = color;
+    burst.appendChild(s);
+  }
+  layer.appendChild(burst);
+  setTimeout(() => burst.remove(), 1300);
+}
+
+// ---- Store: per-user records + head-to-head series -------------------------
+const STORE_KEY = "eighty2_store_v1";
+const USERS = ["Dion", "John", "Sophia"];
+
+function loadStore() {
+  let s = null;
+  try {
+    s = JSON.parse(localStorage.getItem(STORE_KEY));
+  } catch {
+    s = null;
+  }
+  if (!s || typeof s !== "object") s = {};
+  for (const u of USERS) s[u] = s[u] || [];
+  s.h2h = s.h2h || [];
+  return s;
+}
+
+function saveStore(s) {
+  try {
+    for (const u of USERS) s[u] = (s[u] || []).slice(-200);
+    s.h2h = s.h2h.slice(-200);
+    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+  } catch {
+    /* storage may be unavailable (private mode) — fail quietly */
+  }
+}
+
+function bestFor(user) {
+  const recs = loadStore()[user] || [];
+  if (!recs.length) return null;
+  return recs.reduce((a, b) => (b.wins > a.wins ? b : a));
+}
+
+function h2hTally() {
+  const t = { ties: 0 };
+  for (const u of USERS) t[u] = 0;
+  for (const r of loadStore().h2h) {
+    if (r.winner === "tie") t.ties += 1;
+    else if (r.winner in t) t[r.winner] += 1;
+  }
+  return t;
+}
+
+// ---- Optional shared backend (cross-device scoreboard) ---------------------
+// Uses /api/scoreboard when a KV store is configured; otherwise no-ops and the
+// game stays local-only.
+const API = "/api/scoreboard";
+let remoteBoard = null; // last fetched shared board, or null when unavailable
+
+async function remoteGet() {
+  try {
+    const r = await fetch(API, { cache: "no-store" });
+    const j = await r.json();
+    remoteBoard = j && j.configured ? j : null;
+  } catch {
+    remoteBoard = null;
+  }
+  return remoteBoard;
+}
+
+async function remotePost(payload) {
+  try {
+    const r = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    remoteBoard = j && j.configured ? j : remoteBoard;
+  } catch {
+    /* offline / not configured — local store already has it */
+  }
+}
+
+// ---- Start-screen scoreboard ------------------------------------------------
+function paintScoreboard(tally, bests, synced) {
+  const total = USERS.reduce((n, u) => n + (tally[u] || 0), 0) + (tally.ties || 0);
+  const best = (b) => (b ? `${b.wins}–${b.losses} (${b.grade})` : "—");
+  const wins = USERS.map(
+    (u) =>
+      `<span class="sb-cell"><span class="sb-name ${u.toLowerCase()}">${u}</span><span class="sb-wins">${tally[u] || 0}</span></span>`
+  ).join('<span class="sb-x">·</span>');
+  const rows = USERS.map(
+    (u) =>
+      `<div><span class="sb-dot ${u.toLowerCase()}"></span>${u} best <b>${best(bests[u])}</b></div>`
+  ).join("");
+  $("#scoreboard").innerHTML = `
+    <div class="sb-title">Head-to-head wins ${
+      synced ? '<span class="sb-synced">● shared</span>' : ""
+    }</div>
+    <div class="sb-h2h">${wins}</div>
+    <div class="sb-sub">${
+      total === 0
+        ? "No matchups yet — play Head-to-Head"
+        : `${total} played${tally.ties ? ` · ${tally.ties} tied` : ""}`
+    }</div>
+    <div class="sb-bests">${rows}</div>`;
+}
+
+function renderScoreboard() {
+  // Paint from local immediately…
+  const localBests = {};
+  for (const u of USERS) localBests[u] = bestFor(u);
+  paintScoreboard(h2hTally(), localBests, false);
+  // …then upgrade to the shared board if a backend is configured.
+  remoteGet().then((board) => {
+    if (board) paintScoreboard(board.h2h, board.best || {}, true);
+  });
+}
+
+// ---- Solo: record + share ---------------------------------------------------
+function renderPersonalBest() {
+  const node = $("#personal-best");
+  node.classList.remove("hidden");
+
+  // Daily challenge: show today's Dion-vs-John comparison.
+  if (state.daily) {
+    const day = (loadStore().daily || {})[state.daily.date] || {};
+    const cell = (u) =>
+      day[u]
+        ? `<b class="${u.toLowerCase()}">${u} ${day[u].wins}–${day[u].losses}</b>`
+        : `<span class="${u.toLowerCase()}">${u} —</span>`;
+    node.innerHTML = `Today's challenge &nbsp; ${cell("Dion")} &nbsp;vs&nbsp; ${cell("John")}`;
+    return;
+  }
+
+  const best = bestFor(state.user);
+  const count = (loadStore()[state.user] || []).length;
+  node.innerHTML = best
+    ? `${state.user}'s best &nbsp;<b>${best.wins}–${best.losses}</b>&nbsp; (${best.grade}) · ${count} recorded`
+    : `${state.user} has no recorded seasons yet`;
+}
+
+function saveResult() {
+  if (!lastResult) return;
+  const store = loadStore();
+  store[state.user].push(lastResult);
+  saveStore(store);
+  remotePost({
+    type: "solo",
+    user: state.user,
+    wins: lastResult.wins,
+    losses: lastResult.losses,
+    grade: lastResult.grade,
+    strength: lastResult.strength,
+  });
+  const btn = $("#save-result");
+  btn.textContent = "✓ Recorded";
+  btn.disabled = true;
+  renderPersonalBest();
+}
+
+function shareText(r) {
+  const five = r.lineup
+    .map((s) => `${s.pos}: ${s.name} (${s.abbr} ${s.decade})`)
+    .join("\n");
+  return (
+    `82-0 · Built for Dion Kontonis\n` +
+    `${state.user}'s season: ${r.wins}–${r.losses} (Grade ${r.grade}, strength ${r.strength}/100)\n\n` +
+    `${five}\n\nPlay: https://emailcleaner-olive.vercel.app`
+  );
+}
+
+function drawShareCanvas(r) {
+  const W = 1080, H = 1080;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d");
+  const perfect = r.wins === 82;
+
+  const g = x.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#141d2e");
+  g.addColorStop(1, "#090c14");
+  x.fillStyle = g;
+  x.fillRect(0, 0, W, H);
+  x.fillStyle = "#f5b942";
+  x.fillRect(0, 0, W, 12);
+
+  x.textAlign = "center";
+  x.fillStyle = "#ffffff";
+  x.font = "900 140px Archivo, sans-serif";
+  x.fillText("82–0", W / 2, 200);
+  x.fillStyle = "#f5b942";
+  x.font = "700 34px Inter, sans-serif";
+  x.fillText("Built for Dion Kontonis", W / 2, 250);
+  x.fillStyle = "#8b95a9";
+  x.font = "600 28px Inter, sans-serif";
+  const modeLabel = state.daily
+    ? "Daily Challenge"
+    : state.mode === "hoopiq"
+    ? "Hoop IQ"
+    : "Classic";
+  x.fillText(`${state.user} · ${modeLabel}`, W / 2, 312);
+
+  // Record, with wins/losses colored.
+  x.font = "900 170px Archivo, sans-serif";
+  const wT = String(r.wins), dT = " – ", lT = String(r.losses);
+  const wW = x.measureText(wT).width;
+  const dW = x.measureText(dT).width;
+  const lW = x.measureText(lT).width;
+  let sx = (W - (wW + dW + lW)) / 2;
+  x.textAlign = "left";
+  x.fillStyle = perfect ? "#f5b942" : "#34d399";
+  x.fillText(wT, sx, 520);
+  sx += wW;
+  x.fillStyle = "#8b95a9";
+  x.fillText(dT, sx, 520);
+  sx += dW;
+  x.fillStyle = perfect ? "#f5b942" : "#f6685e";
+  x.fillText(lT, sx, 520);
+
+  x.textAlign = "center";
+  x.fillStyle = "#eef2f9";
+  x.font = "800 44px Archivo, sans-serif";
+  x.fillText(`Grade ${r.grade} · ${r.strength}/100`, W / 2, 600);
+
+  // Lineup
+  x.font = "600 36px Inter, sans-serif";
+  let y = 700;
+  for (const s of r.lineup) {
+    x.fillStyle = "#f5b942";
+    x.textAlign = "left";
+    x.fillText(s.pos, 150, y);
+    x.fillStyle = "#eef2f9";
+    x.fillText(s.name, 250, y);
+    x.fillStyle = "#8b95a9";
+    x.textAlign = "right";
+    x.fillText(`${s.abbr} · ${s.decade}`, W - 150, y);
+    y += 64;
+  }
+
+  x.textAlign = "center";
+  x.fillStyle = "#5d6678";
+  x.font = "600 26px Inter, sans-serif";
+  x.fillText("emailcleaner-olive.vercel.app", W / 2, 1030);
+  return c;
+}
+
+async function shareResult() {
+  if (!lastResult) return;
+  const r = lastResult;
+  try {
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  } catch {
+    /* fonts API missing — use fallback fonts */
+  }
+  const canvas = drawShareCanvas(r);
+  const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  const file =
+    blob && window.File ? new File([blob], "82-0-result.png", { type: "image/png" }) : null;
+
+  try {
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "82-0", text: shareText(r) });
+      return;
+    }
+  } catch {
+    /* share sheet dismissed */
+    return;
+  }
+
+  // No file sharing — offer a download, and copy the text summary.
+  if (blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "82-0-result.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showShareToast("Image downloaded");
+  }
+  try {
+    await navigator.clipboard.writeText(shareText(r));
+  } catch {
+    /* clipboard unavailable */
+  }
+}
+
+function showShareToast(msg) {
+  const btn = $("#share-result");
+  const original = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => (btn.textContent = original), 1800);
+}
+
+// ---- Head-to-head: handoff + result ----------------------------------------
+function showHandoff(justFinished) {
+  $("#game-screen").classList.add("hidden");
+  const next = state.h2h.builder;
+  $("#handoff-title").textContent = `${justFinished}'s team is locked in`;
+  $("#handoff-sub").textContent = `Pass the device to ${next} — no peeking at the picks!`;
+  $("#handoff-continue").textContent = `${next}, build your team →`;
+  $("#handoff-screen").classList.remove("hidden");
+}
+
+function handoffContinue() {
+  resetBuildState("classic");
+  beginBuild();
+}
+
+const CATS = [
+  ["ppg", "PTS"],
+  ["rpg", "REB"],
+  ["apg", "AST"],
+  ["spg", "STL"],
+  ["bpg", "BLK"],
+];
+
+function showH2HResult() {
+  const [nameA, nameB] = state.h2h.order;
+  const a = state.h2h.results[nameA];
+  const b = state.h2h.results[nameB];
+
+  let winner;
+  if (a.wins !== b.wins) winner = a.wins > b.wins ? nameA : nameB;
+  else if (a.strength !== b.strength)
+    winner = a.strength > b.strength ? nameA : nameB;
+  else winner = "tie";
+
+  const rec = (x) => ({ wins: x.wins, losses: x.losses, grade: x.grade, strength: x.strength });
+  const now = new Date().toISOString();
+
+  // Persist the matchup and add each lineup to its user's history.
+  const store = loadStore();
+  store.h2h.push({
+    winner,
+    players: [nameA, nameB],
+    records: { [nameA]: rec(a), [nameB]: rec(b) },
+    date: now,
+  });
+  store[nameA].push({ ...a, mode: "h2h", date: now });
+  store[nameB].push({ ...b, mode: "h2h", date: now });
+  saveStore(store);
+  remotePost({
+    type: "h2h",
+    winner,
+    players: [nameA, nameB],
+    records: { [nameA]: rec(a), [nameB]: rec(b) },
+    date: now,
+  });
+
+  $("#game-screen").classList.add("hidden");
+  $("#handoff-screen").classList.add("hidden");
+  $("#h2h-result-screen").classList.remove("hidden");
+
+  $("#h2h-winner").textContent =
+    winner === "tie" ? "It's a tie!" : `${winner} wins!`;
+  $("#h2h-winner").className =
+    "h2h-winner" + (winner === "tie" ? " tie" : ` win-${winner.toLowerCase()}`);
+  $("#h2h-blurb").textContent =
+    winner === "tie"
+      ? "Dead even — identical projected records and strength."
+      : `${winner}'s lineup projects to the better season.`;
+
+  renderH2HSide($("#h2h-side-0"), nameA, a, b, winner);
+  renderH2HSide($("#h2h-side-1"), nameB, b, a, winner);
+
+  const t = h2hTally();
+  $("#h2h-series").innerHTML =
+    "Series so far &nbsp; " +
+    [nameA, nameB]
+      .map((u) => `<b class="${u.toLowerCase()}">${u} ${t[u] || 0}</b>`)
+      .join(" — ") +
+    (t.ties ? ` · ${t.ties} tied` : "");
+
+  const wins = winner === nameA ? a.wins : winner === nameB ? b.wins : 0;
+  launchCelebration(wins);
+}
+
+function renderH2HSide(node, name, me, opp, winner) {
+  const isWinner = winner === name;
+  const cats = CATS.map(([k, abbr]) => {
+    const win = me.totals[k] > opp.totals[k];
+    return `<span class="h2h-cat ${win ? "won" : ""}">${abbr} ${me.totals[k].toFixed(1)}</span>`;
+  }).join("");
+  const lineup = me.lineup
+    .map(
+      (s) =>
+        `<li><span class="rl-pos">${s.pos}</span> ${s.name} <span class="rl-meta">${s.abbr}·${s.decade}</span></li>`
+    )
+    .join("");
+  node.className = "h2h-side" + (isWinner ? " winner" : "");
+  node.innerHTML = `
+    <div class="h2h-head">
+      <span class="h2h-user ${name.toLowerCase()}">${name}</span>
+      ${isWinner ? '<span class="h2h-crown">👑</span>' : ""}
+    </div>
+    <div class="h2h-record"><span class="rec-w">${me.wins}</span><span class="rec-dash">–</span><span class="rec-l">${me.losses}</span></div>
+    <div class="h2h-meta">Grade ${me.grade} · strength ${me.strength}/100</div>
+    <div class="h2h-cats">${cats}</div>
+    <ul class="h2h-lineup">${lineup}</ul>`;
 }
 
 // ---- Wire up ---------------------------------------------------------------
 window.addEventListener("DOMContentLoaded", () => {
-  $("#play-classic").addEventListener("click", () => startGame("classic"));
-  $("#play-hoopiq").addEventListener("click", () => startGame("hoopiq"));
+  renderScoreboard();
+  $("#play-classic").addEventListener("click", () => startSolo("classic"));
+  $("#play-hoopiq").addEventListener("click", () => startSolo("hoopiq"));
+  $("#play-daily").addEventListener("click", startDaily);
+  $("#play-h2h").addEventListener("click", openH2HSetup);
+  $("#user-toggle").addEventListener("click", (e) => {
+    const b = e.target.closest(".utog");
+    if (!b) return;
+    state.user = b.dataset.user;
+    for (const c of $("#user-toggle").children) {
+      c.classList.toggle("active", c === b);
+    }
+  });
+  $("#h2h-players").addEventListener("click", (e) => {
+    const b = e.target.closest(".h2h-pick");
+    if (b) toggleH2HPlayer(b.dataset.user);
+  });
+  $("#h2h-start").addEventListener("click", startH2HMatch);
+  $("#h2h-setup-back").addEventListener("click", backToStart);
+  $("#handoff-continue").addEventListener("click", handoffContinue);
+  $("#h2h-again").addEventListener("click", openH2HSetup);
+  $("#h2h-home").addEventListener("click", backToStart);
   $("#team-skip").addEventListener("click", teamSkip);
   $("#era-skip").addEventListener("click", eraSkip);
   $("#play-again").addEventListener("click", backToStart);
+  $("#roster-search").addEventListener("input", (e) => {
+    state.filter = e.target.value;
+    renderRoster();
+  });
+  $("#pos-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    state.posFilter = chip.dataset.pos;
+    for (const c of $("#pos-chips").children) {
+      c.classList.toggle("active", c === chip);
+    }
+    renderRoster();
+  });
+  $("#sort-select").addEventListener("change", (e) => {
+    state.sort = e.target.value;
+    renderRoster();
+  });
+  $("#save-result").addEventListener("click", saveResult);
+  $("#share-result").addEventListener("click", shareResult);
 });

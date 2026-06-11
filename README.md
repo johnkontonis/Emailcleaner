@@ -40,21 +40,59 @@ python3 -m http.server 8000
 ## Project layout
 
 ```
-index.html        # screens: start, game, result
-css/styles.css    # styling
-js/data.js        # curated player dataset + DataProvider seam
-js/game.js        # slot machine, round flow, simulation, rendering
+index.html                      # screens: start, game, result
+css/styles.css                  # styling
+js/data.js                      # generated player dataset + DataProvider seam
+js/game.js                      # slot machine, round flow, simulation, rendering
+data/curated_seed.json          # hand-built star roster (fills gap eras)
+scripts/generate_dataset.py     # build js/data.js from the bulk 538 dataset
+scripts/build_dataset.py        # rewrite js/data.js stats with nba_api (verified)
+.github/workflows/refresh-stats.yml  # run the build script from CI
 ```
 
 ## Player data
 
-Players are a curated set of stars by franchise and decade with **approximate
-career per-game averages**. Steals and blocks weren't officially tracked before
-the 1973–74 season, so for earlier players those values are fair estimates.
+`js/data.js` holds **~10,400 player entries across every franchise**, generated
+by `scripts/generate_dataset.py`. Coverage:
+
+- **1977–2019 — essentially every player on every team.** Built from
+  [FiveThirtyEight's historical dataset](https://github.com/fivethirtyeight/nba-player-advanced-metrics).
+  Per-game stats are derived from per-36 rates, and steals/blocks are split from
+  a combined figure — so they're close approximations, not official box scores.
+- **1960s, early 1970s, and 2021–present — curated stars only**
+  (`data/curated_seed.json`). The 538 set doesn't cover these years; the
+  `nba_api` script below can fill them in with verified numbers.
 
 All data is accessed through the async `DataProvider` interface in `js/data.js`
 (`getDecades`, `getTeams`, `getRoster`). To swap in a live stats API later,
 reimplement those three methods to `fetch()` and return the same shapes — no
 game logic needs to change.
+
+### Regenerating from the bulk dataset
+
+```bash
+python scripts/generate_dataset.py            # rewrite js/data.js
+python scripts/generate_dataset.py --dry-run  # report only
+```
+
+The script downloads the 538 CSV on first run (cached under `data/`).
+
+### Upgrading to verified stats
+
+`scripts/build_dataset.py` replaces the approximate averages with **real career
+numbers** from stats.nba.com (via [`nba_api`](https://github.com/swar/nba_api)),
+keeping the curated structure (each player's franchise/decade and eligible
+positions — which `nba_api` doesn't expose). It must run somewhere
+stats.nba.com is reachable (your machine or a GitHub Actions runner — not every
+sandbox can reach it):
+
+```bash
+pip install nba_api
+python scripts/build_dataset.py            # rewrite js/data.js in place
+python scripts/build_dataset.py --dry-run  # report only, write nothing
+```
+
+Or trigger the **Refresh player stats** workflow from the Actions tab. Players
+that can't be resolved keep their curated numbers and are reported.
 
 > This is an independent fan project and is not affiliated with 82-0.com or the NBA.
