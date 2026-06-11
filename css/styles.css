@@ -22,6 +22,7 @@
   --info: #4cc2ff;
   --good: #34d399;
   --bad: #f6685e;
+  --sophia: #f472b6;       /* Sophia's color */
 
   --radius: 18px;
   --radius-md: 13px;
@@ -1205,14 +1206,33 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 12px;
   margin: 8px 0 2px;
+  flex-wrap: wrap;
+}
+
+.sb-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
 }
 
 .sb-name {
   font-family: var(--display);
   font-weight: 800;
-  font-size: 18px;
+  font-size: 16px;
+}
+
+.sb-wins {
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -1px;
+}
+
+.sb-x {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .sb-name.dion,
@@ -1225,6 +1245,12 @@ body {
 .sb-dot.john,
 .john {
   color: var(--accent);
+}
+
+.sb-name.sophia,
+.sb-dot.sophia,
+.sophia {
+  color: var(--sophia);
 }
 
 .sb-score {
@@ -1407,6 +1433,45 @@ body {
 
 .h2h-winner.win-john {
   color: var(--accent);
+}
+
+.h2h-winner.win-sophia {
+  color: var(--sophia);
+}
+
+/* Head-to-head setup */
+.h2h-players {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 8px 0 14px;
+}
+
+.h2h-pick {
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+}
+
+.h2h-pick.active {
+  color: var(--ink);
+  background: var(--accent);
+}
+
+.h2h-pick.dion.active {
+  background: var(--info);
+}
+
+.h2h-pick.sophia.active {
+  background: var(--sophia);
+}
+
+.h2h-setup-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 22px;
+  min-height: 18px;
 }
 
 .h2h-winner.tie {

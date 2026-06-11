@@ -49,17 +49,18 @@ module.exports = async (req, res) => {
         req.body && typeof req.body === "object" ? req.body : await readBody(req);
       const b = await readBoard();
       if (body.type === "h2h" && body.winner) {
-        if (body.winner === "tie") b.h2h.ties += 1;
+        if (body.winner === "tie") b.h2h.ties = (b.h2h.ties || 0) + 1;
         else b.h2h[body.winner] = (b.h2h[body.winner] || 0) + 1;
+        // records is a { playerName: {wins,losses,grade,strength} } map.
+        const records = body.records || {};
         b.recent.unshift({
           winner: body.winner,
-          Dion: body.Dion,
-          John: body.John,
+          players: body.players,
+          records,
           date: body.date,
         });
         b.recent = b.recent.slice(0, 20);
-        betterBest(b, "Dion", body.Dion);
-        betterBest(b, "John", body.John);
+        for (const name of Object.keys(records)) betterBest(b, name, records[name]);
       } else if (body.type === "solo" && body.user) {
         betterBest(b, body.user, {
           wins: body.wins,

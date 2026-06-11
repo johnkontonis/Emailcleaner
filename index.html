@@ -78,6 +78,7 @@
           <div class="user-toggle" id="user-toggle">
             <button class="utog active" data-user="Dion">Dion</button>
             <button class="utog" data-user="John">John</button>
+            <button class="utog" data-user="Sophia">Sophia</button>
           </div>
           <div class="mode-buttons">
             <button id="play-classic" class="mode-btn primary">
@@ -98,8 +99,8 @@
         <div class="play-section">
           <div class="section-head">Two players</div>
           <button id="play-h2h" class="mode-btn h2h-btn">
-            <span class="mode-title">Head-to-Head — Dion vs John</span>
-            <span class="mode-sub">Each builds a lineup; the better team wins</span>
+            <span class="mode-title">Head-to-Head</span>
+            <span class="mode-sub">Pick two players; the better lineup wins</span>
           </button>
         </div>
 
@@ -230,6 +231,18 @@
           <button id="share-result" class="action-btn">Share</button>
         </div>
         <button id="play-again" class="action-btn primary play-again">Play again</button>
+      </div>
+    </section>
+
+    <!-- HEAD-TO-HEAD SETUP (pick two players) -->
+    <section id="h2h-setup-screen" class="screen hidden">
+      <div class="handoff-card">
+        <h2 class="handoff-title">Head-to-Head</h2>
+        <p class="handoff-sub">Choose two players. A coin flip decides who builds first.</p>
+        <div class="h2h-players" id="h2h-players"></div>
+        <p class="h2h-setup-hint" id="h2h-setup-hint"></p>
+        <button id="h2h-start" class="action-btn primary">Start match</button>
+        <button id="h2h-setup-back" class="action-btn">Back</button>
       </div>
     </section>
 

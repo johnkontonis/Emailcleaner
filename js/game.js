@@ -506,9 +506,10 @@ function finishGame() {
       totals: result.totals,
       lineup: snapshotLineup(),
     };
-    if (who === "Dion") {
-      state.h2h.builder = "John";
-      showHandoff("Dion");
+    state.h2h.idx += 1;
+    if (state.h2h.idx < state.h2h.order.length) {
+      state.h2h.builder = state.h2h.order[state.h2h.idx];
+      showHandoff(who);
     } else {
       showH2HResult();
     }
@@ -652,12 +653,64 @@ async function startSolo(mode) {
   await beginBuild();
 }
 
-// Two-player head-to-head: Dion builds, then John, then compare.
-async function startH2H() {
+// Two-player head-to-head. Pick the two players, then a coin flip decides who
+// builds first.
+let h2hPick = ["Dion", "John"]; // currently selected two players in the setup
+
+function openH2HSetup() {
   state.daily = null;
-  state.h2h = { builder: "Dion", results: {} };
+  state.h2h = null;
+  h2hPick = ["Dion", "John"];
+  hideAllScreens();
+  $("#h2h-setup-screen").classList.remove("hidden");
+  renderH2HSetup();
+}
+
+function renderH2HSetup() {
+  const wrap = $("#h2h-players");
+  wrap.innerHTML = USERS.map(
+    (u) =>
+      `<button class="utog h2h-pick ${u.toLowerCase()} ${h2hPick.includes(u) ? "active" : ""}" data-user="${u}">${u}</button>`
+  ).join("");
+  const ready = h2hPick.length === 2;
+  $("#h2h-start").disabled = !ready;
+  $("#h2h-setup-hint").textContent = ready
+    ? `${h2hPick[0]} vs ${h2hPick[1]} — first to build is decided by coin flip`
+    : "Pick exactly two players";
+}
+
+function toggleH2HPlayer(user) {
+  if (h2hPick.includes(user)) {
+    h2hPick = h2hPick.filter((u) => u !== user);
+  } else {
+    h2hPick.push(user);
+    if (h2hPick.length > 2) h2hPick.shift(); // keep the two most recent
+  }
+  renderH2HSetup();
+}
+
+async function startH2HMatch() {
+  if (h2hPick.length !== 2) return;
+  // Coin flip for build order.
+  const order = Math.random() < 0.5 ? [...h2hPick] : [h2hPick[1], h2hPick[0]];
+  state.daily = null;
+  state.h2h = { order, idx: 0, builder: order[0], results: {} };
   resetBuildState("classic");
   await beginBuild();
+}
+
+function hideAllScreens() {
+  for (const id of [
+    "#start-screen",
+    "#game-screen",
+    "#result-screen",
+    "#handoff-screen",
+    "#h2h-result-screen",
+    "#h2h-setup-screen",
+  ]) {
+    const n = $(id);
+    if (n) n.classList.add("hidden");
+  }
 }
 
 // ---- Daily challenge -------------------------------------------------------
@@ -748,10 +801,7 @@ function resetRosterControls() {
 
 function backToStart() {
   state.h2h = null;
-  $("#result-screen").classList.add("hidden");
-  $("#h2h-result-screen").classList.add("hidden");
-  $("#handoff-screen").classList.add("hidden");
-  $("#game-screen").classList.add("hidden");
+  hideAllScreens();
   $("#start-screen").classList.remove("hidden");
   renderScoreboard();
 }
@@ -826,7 +876,7 @@ function firework(layer, xVw, yVh) {
 
 // ---- Store: per-user records + head-to-head series -------------------------
 const STORE_KEY = "eighty2_store_v1";
-const USERS = ["Dion", "John"];
+const USERS = ["Dion", "John", "Sophia"];
 
 function loadStore() {
   let s = null;
@@ -836,16 +886,14 @@ function loadStore() {
     s = null;
   }
   if (!s || typeof s !== "object") s = {};
-  s.Dion = s.Dion || [];
-  s.John = s.John || [];
+  for (const u of USERS) s[u] = s[u] || [];
   s.h2h = s.h2h || [];
   return s;
 }
 
 function saveStore(s) {
   try {
-    s.Dion = s.Dion.slice(-200);
-    s.John = s.John.slice(-200);
+    for (const u of USERS) s[u] = (s[u] || []).slice(-200);
     s.h2h = s.h2h.slice(-200);
     localStorage.setItem(STORE_KEY, JSON.stringify(s));
   } catch {
@@ -860,11 +908,11 @@ function bestFor(user) {
 }
 
 function h2hTally() {
-  const recs = loadStore().h2h;
-  const t = { Dion: 0, John: 0, ties: 0 };
-  for (const r of recs) {
+  const t = { ties: 0 };
+  for (const u of USERS) t[u] = 0;
+  for (const r of loadStore().h2h) {
     if (r.winner === "tie") t.ties += 1;
-    else t[r.winner] += 1;
+    else if (r.winner in t) t[r.winner] += 1;
   }
   return t;
 }
@@ -901,37 +949,38 @@ async function remotePost(payload) {
 }
 
 // ---- Start-screen scoreboard ------------------------------------------------
-function paintScoreboard(tally, dionBest, johnBest, synced) {
-  const total = tally.Dion + tally.John + tally.ties;
+function paintScoreboard(tally, bests, synced) {
+  const total = USERS.reduce((n, u) => n + (tally[u] || 0), 0) + (tally.ties || 0);
   const best = (b) => (b ? `${b.wins}–${b.losses} (${b.grade})` : "—");
+  const wins = USERS.map(
+    (u) =>
+      `<span class="sb-cell"><span class="sb-name ${u.toLowerCase()}">${u}</span><span class="sb-wins">${tally[u] || 0}</span></span>`
+  ).join('<span class="sb-x">·</span>');
+  const rows = USERS.map(
+    (u) =>
+      `<div><span class="sb-dot ${u.toLowerCase()}"></span>${u} best <b>${best(bests[u])}</b></div>`
+  ).join("");
   $("#scoreboard").innerHTML = `
-    <div class="sb-title">Head-to-head series ${
+    <div class="sb-title">Head-to-head wins ${
       synced ? '<span class="sb-synced">● shared</span>' : ""
     }</div>
-    <div class="sb-h2h">
-      <span class="sb-name dion">Dion</span>
-      <span class="sb-score">${tally.Dion}<span class="sb-dash">–</span>${tally.John}</span>
-      <span class="sb-name john">John</span>
-    </div>
+    <div class="sb-h2h">${wins}</div>
     <div class="sb-sub">${
       total === 0
         ? "No matchups yet — play Head-to-Head"
         : `${total} played${tally.ties ? ` · ${tally.ties} tied` : ""}`
     }</div>
-    <div class="sb-bests">
-      <div><span class="sb-dot dion"></span>Dion best <b>${best(dionBest)}</b></div>
-      <div><span class="sb-dot john"></span>John best <b>${best(johnBest)}</b></div>
-    </div>`;
+    <div class="sb-bests">${rows}</div>`;
 }
 
 function renderScoreboard() {
   // Paint from local immediately…
-  paintScoreboard(h2hTally(), bestFor("Dion"), bestFor("John"), false);
+  const localBests = {};
+  for (const u of USERS) localBests[u] = bestFor(u);
+  paintScoreboard(h2hTally(), localBests, false);
   // …then upgrade to the shared board if a backend is configured.
   remoteGet().then((board) => {
-    if (board) {
-      paintScoreboard(board.h2h, board.best.Dion, board.best.John, true);
-    }
+    if (board) paintScoreboard(board.h2h, board.best || {}, true);
   });
 }
 
@@ -1135,32 +1184,36 @@ const CATS = [
 ];
 
 function showH2HResult() {
-  const d = state.h2h.results.Dion;
-  const j = state.h2h.results.John;
+  const [nameA, nameB] = state.h2h.order;
+  const a = state.h2h.results[nameA];
+  const b = state.h2h.results[nameB];
 
   let winner;
-  if (d.wins !== j.wins) winner = d.wins > j.wins ? "Dion" : "John";
-  else if (d.strength !== j.strength)
-    winner = d.strength > j.strength ? "Dion" : "John";
+  if (a.wins !== b.wins) winner = a.wins > b.wins ? nameA : nameB;
+  else if (a.strength !== b.strength)
+    winner = a.strength > b.strength ? nameA : nameB;
   else winner = "tie";
+
+  const rec = (x) => ({ wins: x.wins, losses: x.losses, grade: x.grade, strength: x.strength });
+  const now = new Date().toISOString();
 
   // Persist the matchup and add each lineup to its user's history.
   const store = loadStore();
   store.h2h.push({
     winner,
-    Dion: { wins: d.wins, losses: d.losses, grade: d.grade, strength: d.strength },
-    John: { wins: j.wins, losses: j.losses, grade: j.grade, strength: j.strength },
-    date: new Date().toISOString(),
+    players: [nameA, nameB],
+    records: { [nameA]: rec(a), [nameB]: rec(b) },
+    date: now,
   });
-  store.Dion.push({ ...d, mode: "h2h", date: new Date().toISOString() });
-  store.John.push({ ...j, mode: "h2h", date: new Date().toISOString() });
+  store[nameA].push({ ...a, mode: "h2h", date: now });
+  store[nameB].push({ ...b, mode: "h2h", date: now });
   saveStore(store);
   remotePost({
     type: "h2h",
     winner,
-    Dion: { wins: d.wins, losses: d.losses, grade: d.grade, strength: d.strength },
-    John: { wins: j.wins, losses: j.losses, grade: j.grade, strength: j.strength },
-    date: new Date().toISOString(),
+    players: [nameA, nameB],
+    records: { [nameA]: rec(a), [nameB]: rec(b) },
+    date: now,
   });
 
   $("#game-screen").classList.add("hidden");
@@ -1176,15 +1229,18 @@ function showH2HResult() {
       ? "Dead even — identical projected records and strength."
       : `${winner}'s lineup projects to the better season.`;
 
-  renderH2HSide($("#h2h-side-0"), "Dion", d, j, winner);
-  renderH2HSide($("#h2h-side-1"), "John", j, d, winner);
+  renderH2HSide($("#h2h-side-0"), nameA, a, b, winner);
+  renderH2HSide($("#h2h-side-1"), nameB, b, a, winner);
 
   const t = h2hTally();
   $("#h2h-series").innerHTML =
-    `Series so far &nbsp; <b class="dion">Dion ${t.Dion}</b> — <b class="john">${t.John} John</b>` +
+    "Series so far &nbsp; " +
+    [nameA, nameB]
+      .map((u) => `<b class="${u.toLowerCase()}">${u} ${t[u] || 0}</b>`)
+      .join(" — ") +
     (t.ties ? ` · ${t.ties} tied` : "");
 
-  const wins = winner === "Dion" ? d.wins : winner === "John" ? j.wins : 0;
+  const wins = winner === nameA ? a.wins : winner === nameB ? b.wins : 0;
   launchCelebration(wins);
 }
 
@@ -1218,7 +1274,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#play-classic").addEventListener("click", () => startSolo("classic"));
   $("#play-hoopiq").addEventListener("click", () => startSolo("hoopiq"));
   $("#play-daily").addEventListener("click", startDaily);
-  $("#play-h2h").addEventListener("click", startH2H);
+  $("#play-h2h").addEventListener("click", openH2HSetup);
   $("#user-toggle").addEventListener("click", (e) => {
     const b = e.target.closest(".utog");
     if (!b) return;
@@ -1227,8 +1283,14 @@ window.addEventListener("DOMContentLoaded", () => {
       c.classList.toggle("active", c === b);
     }
   });
+  $("#h2h-players").addEventListener("click", (e) => {
+    const b = e.target.closest(".h2h-pick");
+    if (b) toggleH2HPlayer(b.dataset.user);
+  });
+  $("#h2h-start").addEventListener("click", startH2HMatch);
+  $("#h2h-setup-back").addEventListener("click", backToStart);
   $("#handoff-continue").addEventListener("click", handoffContinue);
-  $("#h2h-again").addEventListener("click", startH2H);
+  $("#h2h-again").addEventListener("click", openH2HSetup);
   $("#h2h-home").addEventListener("click", backToStart);
   $("#team-skip").addEventListener("click", teamSkip);
   $("#era-skip").addEventListener("click", eraSkip);
