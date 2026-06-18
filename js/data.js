@@ -29,7 +29,7 @@ const TRIP = {
   // the flights. The Crete→Rome transition (05–06 Jul) is ✳️ TENTATIVE, and
   // there may be extra stops in between — send details and I'll adjust.
   cities: [
-    { name: "Chania (Crete)", country: "Greece", emoji: "🇬🇷", arrive: "2026-06-28", depart: "2026-07-05" },
+    { name: "Chania (Crete)", country: "Greece", emoji: "🇬🇷", arrive: "2026-06-28", depart: "2026-07-02" },
     { name: "Rome",           country: "Italy",  emoji: "🇮🇹", arrive: "2026-07-06", depart: "2026-07-14" },
   ],
 
@@ -57,6 +57,12 @@ const TRIP = {
       from: "Athens (ATH)", to: "Chania (CHQ) · Crete",
       seats: "1A, 2A, 1B, 2B (whole family)", confirmation: "ZKHT01",
       notes: "Economy · direct 1h. Booking.com ref 40-1009310867, PIN 2861. 4 checked bags (23 kg) + 4 carry-on (8 kg).",
+    },
+    {
+      type: "hotel", title: "Chania stay — 1-Bedroom Suite", city: "Chania (Crete)",
+      date: "2026-06-28", endDate: "2026-07-02", time: "15:00", endTime: "11:00",
+      confirmation: "74382334",
+      notes: "Guest: Nevzer Kontonis · 4 guests, 1 room. 1-Bedroom Suite — 1 King + sofa bed, sea view, terrace. Smoke-free. ⚠️ Non-refundable after 11:59 PM, 19 Jun 2026. (Hotel name/address weren't in the confirmation — send them and I'll add.)",
     },
     {
       type: "flight", title: "Rome → Dubai", airline: "Emirates", code: "EK096",
@@ -89,12 +95,12 @@ const TRIP = {
     { date: "2026-06-29", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
     { date: "2026-06-30", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
     { date: "2026-07-01", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
-    { date: "2026-07-02", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
-    { date: "2026-07-03", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
-    { date: "2026-07-04", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
-    { date: "2026-07-05", city: "Chania (Crete)", title: "✳️ Crete → Rome (confirm travel & stops)", items: [
-      { time: "", type: "note", title: "✳️ TENTATIVE: how do we get from Crete to Rome?", notes: "Any extra stops in between (Athens? islands? Italian cities)? Send flights/ferries and hotels and I'll build out these days." },
+    { date: "2026-07-02", city: "Chania (Crete)", title: "Check out of Chania hotel", items: [
+      { time: "11:00", type: "transfer", title: "Hotel check-out (by 11:00)", notes: "✳️ Where to next? Send the next leg + hotel and I'll fill in 02–06 Jul." },
     ]},
+    { date: "2026-07-03", city: "✳️ Next stop (TBD)", title: "✳️ TBD — awaiting details", items: [] },
+    { date: "2026-07-04", city: "✳️ Next stop (TBD)", title: "✳️ TBD — awaiting details", items: [] },
+    { date: "2026-07-05", city: "✳️ Next stop (TBD)", title: "✳️ TBD — awaiting details", items: [] },
     { date: "2026-07-06", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-07", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-08", city: "Rome", title: "Rome", items: [] },
@@ -149,6 +155,7 @@ const TRIP = {
   // ── Reminders (practical, derived from the flights) ────────────────────
   reminders: [
     { date: "2026-06-19", time: "09:00", title: "Check passports valid 6+ months",       notes: "All 4 travelers — Greece & Italy (Schengen)." },
+    { date: "2026-06-19", time: "20:00", title: "⚠️ Chania hotel free-cancellation ends tonight", notes: "Confirmation 74382334 — prepaid / non-refundable after 11:59 PM, 19 Jun." },
     { date: "2026-06-20", time: "12:00", title: "Buy family travel insurance",            notes: "Include medical & baggage cover." },
     { date: "2026-06-22", time: "12:00", title: "Check Greece & Italy entry requirements", notes: "Schengen rules for Australian passport holders." },
     { date: "2026-06-25", time: "21:15", title: "Online check-in opens (EK407)",          notes: "Emirates opens ~48h before departure." },
