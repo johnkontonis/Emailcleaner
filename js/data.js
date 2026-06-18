@@ -9,11 +9,11 @@
  *
  *  Dates are "YYYY-MM-DD". Times are 24h "HH:MM" (or "" / omitted for all-day).
  *
- *  STATUS: International flights below are CONFIRMED from the Emirates e-ticket
- *  (booking GTV6ZJ). Items marked ✳️ TENTATIVE are placeholders to confirm —
- *  the Athens⇄Rome split, hotels, internal travel, and day plans aren't in the
- *  ticket yet. Things-to-do and places-to-eat are real, well-known SUGGESTIONS
- *  (not bookings) so the sections aren't empty.
+ *  STATUS: Flights below are CONFIRMED from booking documents (Emirates GTV6ZJ
+ *  and SKY express ZKHT01). Items marked ✳️ TENTATIVE are placeholders to
+ *  confirm — hotels, the Crete⇄Rome leg, any extra stops, and day plans aren't
+ *  booked/known yet. Things-to-do and places-to-eat are real, well-known
+ *  SUGGESTIONS (not bookings) so the sections aren't empty.
  */
 
 const TRIP = {
@@ -22,18 +22,20 @@ const TRIP = {
   startDate: "2026-06-27",
   endDate: "2026-07-16",
   homeCity: "Melbourne",
+  // Family of 4: John, Nevzer, Dion & Sophia (kept generic per preference).
   travelers: ["The Kontonis family"],
 
-  // Cities visited, in order. Athens & Rome dates are anchored by the flights;
-  // the split between them (07-06) is ✳️ TENTATIVE — confirm & I'll adjust.
+  // Cities visited, in order. Chania (arrive) & Rome (depart) are anchored by
+  // the flights. The Crete→Rome transition (05–06 Jul) is ✳️ TENTATIVE, and
+  // there may be extra stops in between — send details and I'll adjust.
   cities: [
-    { name: "Athens", country: "Greece", emoji: "🇬🇷", arrive: "2026-06-28", depart: "2026-07-06" },
-    { name: "Rome",   country: "Italy",  emoji: "🇮🇹", arrive: "2026-07-06", depart: "2026-07-14" },
+    { name: "Chania (Crete)", country: "Greece", emoji: "🇬🇷", arrive: "2026-06-28", depart: "2026-07-05" },
+    { name: "Rome",           country: "Italy",  emoji: "🇮🇹", arrive: "2026-07-06", depart: "2026-07-14" },
   ],
 
   // ── Reservations ──────────────────────────────────────────────────────
-  // CONFIRMED Emirates flights from the e-ticket (booking ref GTV6ZJ,
-  // ticket 176 2211993713-14). Seats shown are Dion's (single e-ticket).
+  // CONFIRMED flights. Emirates intl seats shown are Dion's e-ticket (GTV6ZJ);
+  // the SKY express domestic leg (ZKHT01) has the whole family's seats.
   reservations: [
     {
       type: "flight", title: "Melbourne → Dubai", airline: "Emirates", code: "EK407",
@@ -47,7 +49,14 @@ const TRIP = {
       date: "2026-06-28", time: "10:50", endTime: "15:00",
       from: "Dubai (DXB) · Terminal 3", to: "Athens (ATH) · Eleftherios Venizelos",
       terminal: "Departs DXB Terminal 3", seats: "14F (Dion)", confirmation: "GTV6ZJ",
-      notes: "Premium Economy (Flex Plus) · 35 kg checked baggage. Connection in Dubai ~5h35.",
+      notes: "Premium Economy (Flex Plus). ⚠️ Athens is a connection: arrive 15:00, then domestic SKY express to Crete at 17:30 — collect bags & re-check (~2h30).",
+    },
+    {
+      type: "flight", title: "Athens → Chania (Crete)", airline: "SKY express", code: "GQ254",
+      date: "2026-06-28", time: "17:30", endTime: "18:30",
+      from: "Athens (ATH)", to: "Chania (CHQ) · Crete",
+      seats: "1A, 2A, 1B, 2B (whole family)", confirmation: "ZKHT01",
+      notes: "Economy · direct 1h. Booking.com ref 40-1009310867, PIN 2861. 4 checked bags (23 kg) + 4 carry-on (8 kg).",
     },
     {
       type: "flight", title: "Rome → Dubai", airline: "Emirates", code: "EK096",
@@ -67,25 +76,26 @@ const TRIP = {
 
   // ── Day-by-day schedule ───────────────────────────────────────────────
   // Skeleton for the whole trip. Confirmed flights merge in by date.
-  // City split on 07-06 is ✳️ TENTATIVE.
+  // The Crete→Rome transition (05–06 Jul) is ✳️ TENTATIVE.
   days: [
     { date: "2026-06-27", city: "Melbourne", title: "Depart Melbourne", items: [
       { time: "18:00", type: "transfer", title: "Head to Melbourne Airport (MEL)", notes: "Allow ~3h for an international flight." },
     ]},
-    { date: "2026-06-28", city: "Athens", title: "Arrive in Athens 🇬🇷", items: [
-      { time: "16:00", type: "transfer", title: "Airport → accommodation", notes: "Metro Line 3 or taxi (~€40 flat fare to centre)." },
-      { time: "19:00", type: "activity", title: "Easy first evening — dinner in Plaka", notes: "Jet-lag friendly stroll under the Acropolis." },
+    { date: "2026-06-28", city: "Chania (Crete)", title: "Arrive Athens → fly to Crete 🇬🇷", items: [
+      { time: "15:00", type: "note", title: "Land in Athens — collect bags & re-check", notes: "Tight ~2h30 connection to the domestic SKY express flight." },
+      { time: "19:00", type: "transfer", title: "Chania Airport → accommodation", notes: "Taxi ~20–30 min to Chania town." },
+      { time: "20:30", type: "activity", title: "First night — Venetian Harbour stroll & dinner", notes: "Easy, jet-lag-friendly evening by the old port." },
     ]},
-    { date: "2026-06-29", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-06-30", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-01", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-02", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-03", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-04", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-05", city: "Athens", title: "Athens", items: [] },
-    { date: "2026-07-06", city: "Rome", title: "✳️ Athens → Rome (confirm travel)", items: [
-      { time: "", type: "note", title: "✳️ TENTATIVE: how do we get from Athens to Rome?", notes: "Flight or ferry? Send details and I'll add the booking + fix these dates." },
+    { date: "2026-06-29", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-06-30", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-07-01", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-07-02", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-07-03", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-07-04", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
+    { date: "2026-07-05", city: "Chania (Crete)", title: "✳️ Crete → Rome (confirm travel & stops)", items: [
+      { time: "", type: "note", title: "✳️ TENTATIVE: how do we get from Crete to Rome?", notes: "Any extra stops in between (Athens? islands? Italian cities)? Send flights/ferries and hotels and I'll build out these days." },
     ]},
+    { date: "2026-07-06", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-07", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-08", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-09", city: "Rome", title: "Rome", items: [] },
@@ -93,7 +103,7 @@ const TRIP = {
     { date: "2026-07-11", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-12", city: "Rome", title: "Rome", items: [] },
     { date: "2026-07-13", city: "Rome", title: "Rome", items: [
-      { time: "", type: "note", title: "Pre-book Rome → FCO airport transfer", notes: "Van taxi for the family + luggage. Flight out is 22:10." },
+      { time: "", type: "note", title: "Pre-book Rome → FCO airport transfer", notes: "Van taxi for 4 + luggage. Flight out is 22:10." },
     ]},
     { date: "2026-07-14", city: "Rome", title: "Depart Rome (night flight)", items: [
       { time: "19:00", type: "transfer", title: "Rome → Fiumicino Airport (FCO)", notes: "Be at FCO ~3h before EK096 (22:10)." },
@@ -106,14 +116,13 @@ const TRIP = {
 
   // ── Things to do (real, well-known SUGGESTIONS — tick them off) ─────────
   thingsToDo: [
-    { city: "Athens", name: "Acropolis & the Parthenon",        category: "Sights",  notes: "Go early (08:00) to beat heat & crowds. Book timed entry." },
-    { city: "Athens", name: "Acropolis Museum",                 category: "Museum",  notes: "Cool, modern, kid-friendly. Glass floor over ruins." },
-    { city: "Athens", name: "Ancient Agora & Temple of Hephaestus", category: "Sights", notes: "Best-preserved ancient temple in Greece." },
-    { city: "Athens", name: "Plaka & Anafiotika wander",        category: "Family",  notes: "Charming old streets below the Acropolis." },
-    { city: "Athens", name: "National Archaeological Museum",   category: "Museum",  notes: "World-class ancient Greek collection." },
-    { city: "Athens", name: "Mount Lycabettus at sunset",       category: "Sights",  notes: "Funicular to the top for city + sea views." },
-    { city: "Athens", name: "Day trip: Cape Sounion (Temple of Poseidon)", category: "Day trip", notes: "Sunset over the Aegean — ~1.5h drive." },
-    { city: "Athens", name: "Optional day trip: Nafplio or Delphi", category: "Day trip", notes: "Decide based on energy & weather." },
+    { city: "Chania (Crete)", name: "Chania Old Town & Venetian Harbour", category: "Sights",  notes: "Wander the harbour & lighthouse at golden hour." },
+    { city: "Chania (Crete)", name: "Balos Lagoon & Gramvousa",           category: "Day trip", notes: "Turquoise lagoon — boat trip or 4x4 + boat." },
+    { city: "Chania (Crete)", name: "Elafonissi Beach (pink sand)",       category: "Day trip", notes: "Shallow, calm water — great for the kids." },
+    { city: "Chania (Crete)", name: "Falassarna Beach sunset",            category: "Beach",    notes: "Long sandy beach, famous sunsets." },
+    { city: "Chania (Crete)", name: "Samaria or Imbros Gorge hike",       category: "Nature",   notes: "Imbros is shorter/easier with children." },
+    { city: "Chania (Crete)", name: "Maritime Museum of Crete",           category: "Museum",   notes: "By the harbour — quick, kid-friendly." },
+    { city: "Chania (Crete)", name: "Knossos Palace (day trip)",          category: "Day trip", notes: "Minoan palace near Heraklion — longer drive." },
     { city: "Rome",   name: "Colosseum & Roman Forum",          category: "Sights",  notes: "Book skip-the-line. Hats & water — little shade." },
     { city: "Rome",   name: "Vatican Museums & Sistine Chapel", category: "Museum",  notes: "Book ahead. Shoulders & knees covered." },
     { city: "Rome",   name: "St. Peter's Basilica & dome climb", category: "Sights", notes: "Free entry; small fee for the dome." },
@@ -125,11 +134,11 @@ const TRIP = {
 
   // ── Places to eat (real, well-known SUGGESTIONS — no bookings yet) ──────
   placesToEat: [
-    { city: "Athens", name: "O Thanasis",          cuisine: "Souvlaki / grill", area: "Monastiraki", notes: "Famous kebabs by Monastiraki square.", reservation: "" },
-    { city: "Athens", name: "Kostas",              cuisine: "Souvlaki",         area: "Agia Irini",  notes: "Tiny legendary souvlaki spot, lunch.", reservation: "" },
-    { city: "Athens", name: "Ta Karamanlidika tou Fani", cuisine: "Meze / deli", area: "Psyrri",    notes: "Great mezze platters, family-friendly.", reservation: "" },
-    { city: "Athens", name: "Diporto Agoras",      cuisine: "Old taverna",      area: "Central Market", notes: "No-frills classic; cash only.", reservation: "" },
-    { city: "Athens", name: "Lukumades",           cuisine: "Dessert",          area: "Agia Irini",  notes: "Greek honey doughnuts — kid favourite.", reservation: "" },
+    { city: "Chania (Crete)", name: "Tamam",          cuisine: "Cretan",        area: "Old Town",     notes: "Traditional Cretan in a former hammam.", reservation: "" },
+    { city: "Chania (Crete)", name: "To Maridaki",    cuisine: "Seafood / meze", area: "Chania",      notes: "Local favourite for fresh fish & mezze.", reservation: "" },
+    { city: "Chania (Crete)", name: "Salis",          cuisine: "Modern Cretan", area: "Venetian Harbour", notes: "Harbour views, good for families.", reservation: "" },
+    { city: "Chania (Crete)", name: "Oasis",          cuisine: "Souvlaki / gyros", area: "Chania",    notes: "Quick, cheap, kid-friendly.", reservation: "" },
+    { city: "Chania (Crete)", name: "Bougatsa Chania", cuisine: "Bougatsa",     area: "Old Town",     notes: "Cretan cheese pastry — breakfast/snack.", reservation: "" },
     { city: "Rome",   name: "Roscioli",            cuisine: "Roman / deli",     area: "Campo de' Fiori", notes: "Famous carbonara. Book ahead.", reservation: "" },
     { city: "Rome",   name: "Pizzarium Bonci",     cuisine: "Pizza al taglio",  area: "Prati",       notes: "Quick lunch near the Vatican.", reservation: "" },
     { city: "Rome",   name: "Armando al Pantheon", cuisine: "Trattoria",        area: "Pantheon",    notes: "Cozy, family-run. Reserve early!", reservation: "" },
@@ -139,13 +148,14 @@ const TRIP = {
 
   // ── Reminders (practical, derived from the flights) ────────────────────
   reminders: [
-    { date: "2026-06-19", time: "09:00", title: "Check passports valid 6+ months",       notes: "All travelers — Greece & Italy (Schengen)." },
+    { date: "2026-06-19", time: "09:00", title: "Check passports valid 6+ months",       notes: "All 4 travelers — Greece & Italy (Schengen)." },
     { date: "2026-06-20", time: "12:00", title: "Buy family travel insurance",            notes: "Include medical & baggage cover." },
     { date: "2026-06-22", time: "12:00", title: "Check Greece & Italy entry requirements", notes: "Schengen rules for Australian passport holders." },
     { date: "2026-06-25", time: "21:15", title: "Online check-in opens (EK407)",          notes: "Emirates opens ~48h before departure." },
-    { date: "2026-06-26", time: "20:00", title: "Pack — EU Type C/F adapters & chargers",  notes: "PE allowance: 35 kg checked + 10 kg carry-on each." },
+    { date: "2026-06-26", time: "20:00", title: "Pack — EU Type C/F adapters & chargers",  notes: "Emirates 35 kg checked; SKY express 23 kg checked + 8 kg carry-on." },
     { date: "2026-06-27", time: "18:15", title: "Arrive at Melbourne Airport (MEL)",       notes: "~3h before EK407 (21:15). 90 min before for passport control." },
-    { date: "2026-07-13", time: "18:00", title: "Confirm Rome → FCO airport transfer",     notes: "Van taxi for the family + luggage." },
+    { date: "2026-06-28", time: "15:00", title: "Athens: clear immigration, grab bags, re-check", notes: "Only ~2h30 to the Crete flight (SKY express GQ254, 17:30)." },
+    { date: "2026-07-13", time: "18:00", title: "Confirm Rome → FCO airport transfer",     notes: "Van taxi for 4 + luggage." },
     { date: "2026-07-14", time: "19:10", title: "Arrive at Rome Fiumicino (FCO)",          notes: "~3h before EK096 (22:10)." },
   ],
 
