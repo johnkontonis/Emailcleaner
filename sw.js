@@ -1,18 +1,17 @@
 /*
- * 82-0 service worker — makes the app load instantly and work offline.
+ * European Adventure service worker — instant load + offline access.
  *
- * Same-origin requests are network-first (so online players always get the
- * latest build) with a cache fallback for offline. Cross-origin assets (fonts,
- * team logos) are cache-first. Bump CACHE on meaningful asset changes.
+ * Same-origin requests are network-first (so you always get the latest build
+ * online) with a cache fallback when offline. Cross-origin assets (fonts) are
+ * cache-first. Bump CACHE on meaningful asset changes.
  */
-const CACHE = "82-0-v3";
+const CACHE = "euro-trip-v1";
 const CORE = [
   "/",
   "/index.html",
   "/css/styles.css",
   "/js/data.js",
-  "/js/teams.js",
-  "/js/game.js",
+  "/js/app.js",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -40,11 +39,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
 
-  // The shared scoreboard must never be cached.
-  if (sameOrigin && url.pathname.startsWith("/api/")) return;
-
   if (sameOrigin) {
-    // Network-first, fall back to cache (then to the app shell when offline).
     e.respondWith(
       fetch(req)
         .then((res) => {
@@ -55,7 +50,6 @@ self.addEventListener("fetch", (e) => {
         .catch(() => caches.match(req).then((m) => m || caches.match("/index.html")))
     );
   } else {
-    // Cache-first for fonts / logos (they rarely change).
     e.respondWith(
       caches.match(req).then(
         (cached) =>
