@@ -59,10 +59,11 @@ const TRIP = {
       notes: "Economy · direct 1h. Booking.com ref 40-1009310867, PIN 2861. 4 checked bags (23 kg) + 4 carry-on (8 kg).",
     },
     {
-      type: "hotel", title: "Chania stay — 1-Bedroom Suite", city: "Chania (Crete)",
+      type: "hotel", title: "JW Marriott Crete Resort & Spa", city: "Chania (Crete)",
       date: "2026-06-28", endDate: "2026-07-02", time: "15:00", endTime: "11:00",
+      address: "Marathi, Akrotiri, Chania 731 00, Crete, Greece", phone: "+30 282 1030550",
       confirmation: "74382334",
-      notes: "Guest: Nevzer Kontonis · 4 guests, 1 room. 1-Bedroom Suite — 1 King + sofa bed, sea view, terrace. Smoke-free. ⚠️ Non-refundable after 11:59 PM, 19 Jun 2026. (Hotel name/address weren't in the confirmation — send them and I'll add.)",
+      notes: "Guest: Nevzer Kontonis · 4 guests, 1 room. 1-Bedroom Suite — 1 King + sofa bed, sea view, terrace. Smoke-free. ⚠️ Non-refundable after 11:59 PM, 19 Jun 2026. Beach resort on the Akrotiri peninsula (~15 min from Chania airport, ~20 min from the old town).",
     },
     {
       type: "flight", title: "Rome → Dubai", airline: "Emirates", code: "EK096",
@@ -89,8 +90,8 @@ const TRIP = {
     ]},
     { date: "2026-06-28", city: "Chania (Crete)", title: "Arrive Athens → fly to Crete 🇬🇷", items: [
       { time: "15:00", type: "note", title: "Land in Athens — collect bags & re-check", notes: "Tight ~2h30 connection to the domestic SKY express flight." },
-      { time: "19:00", type: "transfer", title: "Chania Airport → accommodation", notes: "Taxi ~20–30 min to Chania town." },
-      { time: "20:30", type: "activity", title: "First night — Venetian Harbour stroll & dinner", notes: "Easy, jet-lag-friendly evening by the old port." },
+      { time: "19:00", type: "transfer", title: "Chania Airport → JW Marriott (Marathi)", notes: "Short ~15 min hop on the Akrotiri peninsula." },
+      { time: "20:30", type: "activity", title: "First night — settle in & dinner at the resort", notes: "Easy, jet-lag-friendly evening. Old town can wait for tomorrow." },
     ]},
     { date: "2026-06-29", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
     { date: "2026-06-30", city: "Chania (Crete)", title: "Chania, Crete", items: [] },
