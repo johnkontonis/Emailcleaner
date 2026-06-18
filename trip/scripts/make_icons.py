@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Generate original home-screen icons for the 82-0 web app (no deps).
+"""Generate original home-screen icons for the European Adventure app (no deps).
 
-Draws a basketball mark on the app's dark/gold theme and writes PNGs with a
-hand-rolled encoder, so it works without Pillow/ImageMagick. Original artwork —
-no team logos or copyrighted material.
+Draws a simple globe mark on the app's teal theme and writes PNGs with a
+hand-rolled encoder, so it works without Pillow/ImageMagick. Original artwork.
 """
 import math
 import struct
@@ -14,11 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "icons"
 OUT.mkdir(exist_ok=True)
 
-BG_TOP = (26, 33, 48)
-BG_BOT = (9, 12, 20)
-BALL = (245, 185, 66)
-BALL_EDGE = (190, 140, 40)
-SEAM = (24, 18, 8)
+BG_TOP = (16, 132, 156)   # teal
+BG_BOT = (8, 100, 130)    # deeper teal
+GLOBE = (245, 244, 238)   # warm white
+GLOBE_EDGE = (210, 209, 200)
+GRID = (16, 132, 156)     # teal lines on the globe
+LAND = (47, 143, 91)      # green land hints
 
 
 def lerp(a, b, t):
@@ -26,11 +26,11 @@ def lerp(a, b, t):
 
 
 def render(n):
-    """Render an n x n RGBA bytearray (supersampled, then it's the master)."""
+    """Render an n x n RGBA bytearray (supersampled master)."""
     buf = bytearray(n * n * 4)
     cx = cy = n / 2
-    R = n * 0.33
-    lw = n * 0.016  # seam line half-width
+    R = n * 0.34
+    lw = n * 0.012  # grid line half-width
     for y in range(n):
         t = y / n
         bg = lerp(BG_TOP, BG_BOT, t)
@@ -38,17 +38,21 @@ def render(n):
             dx, dy = x - cx, y - cy
             d = math.hypot(dx, dy)
             if d <= R:
-                col = BALL
-                # vertical + horizontal seams
-                if abs(dx) < lw or abs(dy) < lw:
-                    col = SEAM
-                # two curved side seams (arcs of circles centered off-axis)
-                for sgn in (-1, 1):
-                    acx = cx + sgn * R
-                    if abs(math.hypot(x - acx, y - cy) - R) < lw:
-                        col = SEAM
-                if d > R - n * 0.025:  # rim shading
-                    col = BALL_EDGE
+                col = GLOBE
+                # equator + central meridian
+                if abs(dy) < lw or abs(dx) < lw:
+                    col = GRID
+                # latitude lines
+                for lat in (-0.55, 0.55):
+                    if abs(dy - lat * R) < lw and abs(dx) < R * math.sqrt(max(0.0, 1 - lat * lat)):
+                        col = GRID
+                # longitude ellipses (meridians)
+                for k in (0.5, 1.0):
+                    a = R * k
+                    if a > 1e-6 and abs((dx * dx) / (a * a) + (dy * dy) / (R * R) - 1) < (lw / R) * 2.2:
+                        col = GRID
+                if d > R - n * 0.02:  # rim
+                    col = GLOBE_EDGE
             else:
                 col = bg
             i = (y * n + x) * 4

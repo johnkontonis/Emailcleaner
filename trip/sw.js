@@ -1,22 +1,22 @@
 /*
- * 82-0 service worker — makes the app load instantly and work offline.
+ * European Adventure service worker — instant load + offline access.
  *
- * Same-origin requests are network-first (so online players always get the
- * latest build) with a cache fallback for offline. Cross-origin assets (fonts,
- * team logos) are cache-first. Bump CACHE on meaningful asset changes.
+ * Lives at /trip/sw.js so its scope is the /trip/ folder. All cached paths are
+ * RELATIVE so the app works whether it's served from a subfolder or a root.
+ * Same-origin requests are network-first (latest build online) with a cache
+ * fallback offline; cross-origin assets (fonts) are cache-first.
  */
-const CACHE = "82-0-v3";
+const CACHE = "euro-trip-v2";
 const CORE = [
-  "/",
-  "/index.html",
-  "/css/styles.css",
-  "/js/data.js",
-  "/js/teams.js",
-  "/js/game.js",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/apple-touch-icon.png",
+  "./",
+  "./index.html",
+  "./css/styles.css",
+  "./js/data.js",
+  "./js/app.js",
+  "./manifest.webmanifest",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "./icons/apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -40,11 +40,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
 
-  // The shared scoreboard must never be cached.
-  if (sameOrigin && url.pathname.startsWith("/api/")) return;
-
   if (sameOrigin) {
-    // Network-first, fall back to cache (then to the app shell when offline).
     e.respondWith(
       fetch(req)
         .then((res) => {
@@ -52,10 +48,9 @@ self.addEventListener("fetch", (e) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match(req).then((m) => m || caches.match("/index.html")))
+        .catch(() => caches.match(req).then((m) => m || caches.match("./index.html")))
     );
   } else {
-    // Cache-first for fonts / logos (they rarely change).
     e.respondWith(
       caches.match(req).then(
         (cached) =>
