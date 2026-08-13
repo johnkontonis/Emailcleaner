@@ -75,6 +75,30 @@
 
   // ================= DASHBOARD =================
 
+  /**
+   * Dishes currently costed on the dearer of their two sources. This is money
+   * already on the table, so it belongs on the dashboard rather than buried in
+   * each recipe.
+   */
+  function swapNote(analysis) {
+    const swaps = analysis.items.filter((i) => {
+      const m = i.makeVsBuy;
+      if (!m || m.cheaper === 'level') return false;
+      return (m.cheaper === 'buy' && i.sourcing === 'inhouse')
+        || (m.cheaper === 'make' && i.sourcing === 'boughtin');
+    });
+    if (!swaps.length) return '';
+
+    const saving = swaps.reduce((sum, i) =>
+      sum + Math.abs(i.makeVsBuy.difference) * (i.unitsSold || 0), 0);
+    const names = swaps.map((i) => esc(i.name)).join(', ');
+
+    return `<div class="banner warn">
+      ${swaps.length} dish${swaps.length > 1 ? 'es are' : ' is'} costed on the dearer
+      source — ${names}.${saving > 0 ? ` Switching would save ${money(saving)} across current volumes.` : ''}
+    </div>`;
+  }
+
   function renderDashboard() {
     const ctx = Store.ctx();
     const a = Costing.analyseMenu(ctx.recipes, ctx);
@@ -133,6 +157,7 @@
       </div>
 
       ${a.belowTarget > 0 ? `<div class="banner warn">${a.belowTarget} of ${a.itemCount} dishes sit below their target GP.</div>` : ''}
+      ${swapNote(a)}
 
       <div class="stat-grid">
         <div class="stat"><div class="stat-label">Weighted GP</div>
@@ -279,17 +304,49 @@
               <optgroup label="Sub-recipes">${sortedSubs.map((r) => opt('recipe', r)).join('')}</optgroup>`;
     };
 
+    // Anything can be a bought-in alternative, but finished products are what
+    // you almost always want, so they sort to the top.
+    const altOptions = (alt) => {
+      const opt = (i) =>
+        `<option value="${esc(i.id)}"${alt && alt.refId === i.id ? ' selected' : ''}>${esc(i.name)}</option>`;
+      const finished = sortedIngredients.filter((i) => i.isFinishedProduct);
+      const rest = sortedIngredients.filter((i) => !i.isFinishedProduct);
+      return (finished.length ? `<optgroup label="Finished products">${finished.map(opt).join('')}</optgroup>` : '')
+        + `<optgroup label="Other ingredients">${rest.map(opt).join('')}</optgroup>`;
+    };
+
     const lineRows = (draft.lines || []).map((line, idx) => {
       const c = costed.lines[idx] || {};
+      const primary = c.primary || c;
+      const alt = line.alt;
+      const altCost = c.alt || {};
+
+      const altBlock = alt ? `
+        <div class="alt-row">
+          <span class="alt-tag" title="Bought in from a supplier instead of made here">buy in</span>
+          <select data-line="${idx}" data-f="alt-ref">${altOptions(alt)}</select>
+          <input type="number" step="any" min="0" data-line="${idx}" data-f="alt-qty" value="${esc(alt.qty)}">
+          <select data-line="${idx}" data-f="alt-unit">${unitOptions(Units.normaliseUnit(alt.unit))}</select>
+          <span class="line-cost">${altCost.error ? '—' : money(altCost.cost, 3)}</span>
+          <div class="source-toggle" role="group" aria-label="Cost this line on">
+            <button type="button" class="${line.useAlt ? '' : 'on'}" data-act="use-make" data-line="${idx}">make</button>
+            <button type="button" class="${line.useAlt ? 'on' : ''}" data-act="use-buy" data-line="${idx}">buy</button>
+          </div>
+          <button class="icon-btn" data-act="del-alt" data-line="${idx}" title="Remove the bought-in option">✕</button>
+        </div>
+        ${altCost.error ? `<div class="line-error">${esc(altCost.error)}</div>` : ''}` : '';
+
       return `
-        <div class="line-row">
+        <div class="line-row${alt ? ' has-alt' : ''}">
           <select data-line="${idx}" data-f="ref">${refOptions(line)}</select>
           <input type="number" step="any" min="0" data-line="${idx}" data-f="qty" value="${esc(line.qty)}">
           <select data-line="${idx}" data-f="unit">${unitOptions(Units.normaliseUnit(line.unit))}</select>
-          <span class="line-cost">${c.error ? '—' : money(c.cost, 3)}</span>
+          <span class="line-cost">${primary.error ? '—' : money(primary.cost, 3)}</span>
+          ${alt ? '' : `<button class="icon-btn" data-act="add-alt" data-line="${idx}" title="Add a bought-in alternative">⇄</button>`}
           <button class="icon-btn" data-act="del-line" data-line="${idx}" title="Remove">✕</button>
         </div>
-        ${c.error ? `<div class="line-error">${esc(c.error)}</div>` : ''}`;
+        ${primary.error ? `<div class="line-error">${esc(primary.error)}</div>` : ''}
+        ${altBlock}`;
     }).join('');
 
     $('#editor').innerHTML = `
@@ -363,12 +420,54 @@
       ${!isSub && costed.sellPrice > 0 && !costed.onTarget
         ? `<div class="banner warn" style="margin-top:14px">Below the ${pct(costed.targetGpPct, 0)} target — ${money(costed.suggestedPrice)} would hit it.</div>` : ''}
 
+      ${costed.makeVsBuy ? makeVsBuyPanel(costed, draft) : ''}
+
       <div class="section-title">Method</div>
       <div class="field">
         <textarea data-f="method" placeholder="Prep and cooking notes…">${esc(draft.method || '')}</textarea>
       </div>`;
 
     wireEditor();
+  }
+
+  /**
+   * Make-or-buy. The per-serve gap is the honest number, but a couple of cents
+   * a serve is easy to wave away — so it is also shown across the period's
+   * volume, which is where the decision actually gets made.
+   */
+  function makeVsBuyPanel(costed, recipe) {
+    const m = costed.makeVsBuy;
+    const gap = Math.abs(m.difference);
+    const sold = Number(recipe.unitsSold || 0);
+    const swapped = m.swappedLines
+      .map((s) => `${esc(s.made)} vs ${esc(s.bought)}`)
+      .join('; ');
+
+    const verdict = m.cheaper === 'level'
+      ? 'Line ball — the two come out the same, so decide on labour and consistency.'
+      : `${m.cheaper === 'make' ? 'Making it here' : 'Buying it in'} is
+         <strong>${money(gap)}</strong> a serve cheaper${
+           Math.abs(m.savingPct) >= 0.5 ? ` (${pct(Math.abs(m.savingPct))})` : ''}${
+           sold > 0 ? ` — <strong>${money(gap * sold)}</strong> across ${sold} serves` : ''}.`;
+
+    return `
+      <div class="section-title">Make or buy</div>
+      <div class="mvb">
+        <div class="mvb-options">
+          <div class="mvb-side${m.cheaper === 'make' ? ' win' : ''}${costed.sourcing === 'inhouse' ? ' active' : ''}">
+            <div class="k">Make in-house</div>
+            <div class="v">${money(m.makeCost)}</div>
+            <div class="mvb-note">${costed.sourcing === 'inhouse' ? 'currently costed on this' : ''}</div>
+          </div>
+          <div class="mvb-side${m.cheaper === 'buy' ? ' win' : ''}${costed.sourcing === 'boughtin' ? ' active' : ''}">
+            <div class="k">Buy in finished</div>
+            <div class="v">${money(m.buyCost)}</div>
+            <div class="mvb-note">${costed.sourcing === 'boughtin' ? 'currently costed on this' : ''}</div>
+          </div>
+        </div>
+        <p class="mvb-verdict">${verdict}</p>
+        <p class="field-hint">Comparing ${swapped}. Everything else on the plate is counted both ways.</p>
+      </div>`;
   }
 
   function wireEditor() {
@@ -394,15 +493,20 @@
       const idx = Number(el.dataset.line);
       if (el.dataset.act === 'del-line' || el.tagName === 'BUTTON') return;
       el.addEventListener('change', () => {
-        const f = el.dataset.f;
-        if (f === 'ref') {
-          const [kind, refId] = el.value.split(':');
-          draft.lines[idx].kind = kind;
-          draft.lines[idx].refId = refId;
-        } else if (f === 'qty') {
-          draft.lines[idx].qty = Number(el.value);
-        } else {
-          draft.lines[idx].unit = el.value;
+        const line = draft.lines[idx];
+        switch (el.dataset.f) {
+          case 'ref': {
+            const [kind, refId] = el.value.split(':');
+            line.kind = kind;
+            line.refId = refId;
+            break;
+          }
+          case 'qty': line.qty = Number(el.value); break;
+          case 'unit': line.unit = el.value; break;
+          // The alternative is always an ingredient, so it only needs an id.
+          case 'alt-ref': line.alt.refId = el.value; break;
+          case 'alt-qty': line.alt.qty = Number(el.value); break;
+          case 'alt-unit': line.alt.unit = el.value; break;
         }
         renderEditor();
       });
@@ -423,7 +527,39 @@
         if (!first) { toast('Add an ingredient first.'); return; }
         draft.lines.push({ kind: 'ingredient', refId: first.id, qty: 100, unit: 'g' });
         renderEditor();
+        return;
       }
+
+      const lineOf = (sel) => {
+        const el = e.target.closest(sel);
+        return el ? draft.lines[Number(el.dataset.line)] : null;
+      };
+
+      const addAlt = lineOf('[data-act="add-alt"]');
+      if (addAlt) {
+        // Default to a finished product if there is one — that is what a
+        // bought-in alternative almost always is.
+        const pick = Store.ingredients().find((i) => i.isFinishedProduct) || Store.ingredients()[0];
+        if (!pick) { toast('Add an ingredient first.'); return; }
+        addAlt.alt = { refId: pick.id, qty: addAlt.qty, unit: addAlt.unit };
+        addAlt.useAlt = false;
+        renderEditor();
+        return;
+      }
+
+      const delAlt = lineOf('[data-act="del-alt"]');
+      if (delAlt) {
+        delete delAlt.alt;
+        delete delAlt.useAlt;
+        renderEditor();
+        return;
+      }
+
+      const useMake = lineOf('[data-act="use-make"]');
+      if (useMake) { useMake.useAlt = false; renderEditor(); return; }
+
+      const useBuy = lineOf('[data-act="use-buy"]');
+      if (useBuy) { useBuy.useAlt = true; renderEditor(); }
     };
   }
 
@@ -460,7 +596,10 @@
   function renderIngredients() {
     const term = ingSearch.trim().toLowerCase();
     const list = Store.ingredients()
-      .filter((i) => !term || i.name.toLowerCase().includes(term) || (i.supplier || '').toLowerCase().includes(term))
+      .filter((i) => !term
+        || i.name.toLowerCase().includes(term)
+        || (i.supplier || '').toLowerCase().includes(term)
+        || (i.productCode || '').toLowerCase().includes(term))
       .slice().sort((a, b) => a.name.localeCompare(b.name));
 
     const rows = list.map((i) => {
@@ -480,7 +619,10 @@
       const yieldPct = i.yieldPct == null ? 100 : i.yieldPct;
       return `
         <tr class="clickable" data-ingredient="${esc(i.id)}">
-          <td class="name-cell">${esc(i.name)}<span class="sub-note">${esc(i.supplier || 'No supplier')}${i.category ? ` · ${esc(i.category)}` : ''}</span></td>
+          <td class="name-cell">${esc(i.name)}
+            ${i.isFinishedProduct ? '<span class="tag product">finished product</span>' : ''}
+            <span class="sub-note">${esc(i.supplier || 'No supplier')}${
+              i.productCode ? ` · ${esc(i.productCode)}` : ''}${i.category ? ` · ${esc(i.category)}` : ''}</span></td>
           <td class="num">${esc(i.packSize)} ${esc(Units.unitLabel(i.packUnit))}</td>
           <td class="num">${money(i.packPrice)}</td>
           <td class="num">${yieldPct < 100 ? `<span class="pill warn">${pct(yieldPct, 0)}</span>` : `${pct(yieldPct, 0)}`}</td>
@@ -533,9 +675,19 @@
        <div class="field-row">
          <div class="field"><label for="i-supplier">Supplier</label>
            <input id="i-supplier" value="${esc(ing.supplier || '')}"></div>
+         <div class="field"><label for="i-code">Supplier product code</label>
+           <input id="i-code" value="${esc(ing.productCode || '')}" placeholder="optional"></div>
          <div class="field"><label for="i-category">Category</label>
            <input id="i-category" value="${esc(ing.category || '')}"></div>
        </div>
+       <label class="checkline">
+         <input type="checkbox" id="i-finished" ${ing.isFinishedProduct ? 'checked' : ''}>
+         Finished product — bought in ready to serve or cook
+       </label>
+       <p class="field-hint" style="margin:-8px 0 14px">
+         Costs exactly like any other ingredient. Marking it lets the app offer it
+         as a bought-in alternative to something you make yourself.
+       </p>
        <div class="field-row">
          <div class="field"><label for="i-packsize">Pack size</label>
            <input id="i-packsize" type="number" step="any" min="0" value="${esc(ing.packSize)}"></div>
@@ -560,7 +712,9 @@
           ...ing,
           name: $('#i-name').value.trim(),
           supplier: $('#i-supplier').value.trim(),
+          productCode: $('#i-code').value.trim(),
           category: $('#i-category').value.trim(),
+          isFinishedProduct: $('#i-finished').checked,
           packSize: Number($('#i-packsize').value),
           packUnit: $('#i-packunit').value,
           packPrice: Number($('#i-packprice').value),

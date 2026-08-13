@@ -65,10 +65,11 @@ const Costing = (() => {
   }
 
   /**
-   * Cost a single recipe line. Returns the line cost plus enough detail to show
-   * the user *why* it costs that, which is the whole point of a costing tool.
+   * Cost one reference — a quantity of an ingredient or of another recipe.
+   * Returns enough detail to show the user *why* it costs that, which is the
+   * whole point of a costing tool.
    */
-  function costLine(line, ctx) {
+  function costRef(line, ctx) {
     const qty = Number(line.qty);
     const result = {
       kind: line.kind,
@@ -128,6 +129,32 @@ const Costing = (() => {
   }
 
   /**
+   * Cost a recipe line, including its alternative source if it has one.
+   *
+   * A line can be sourced two ways: made from what it names (house-crumbed
+   * schnitzel) or bought in finished from a supplier (G&T's premade). Both are
+   * always costed so the make-or-buy comparison is available; `useAlt` decides
+   * which one the dish is actually costed on.
+   *
+   * The swap lives on the line rather than the recipe because a dish is rarely
+   * only the swapped item — buy the schnitzel in and you still plate the chips.
+   */
+  function costLine(line, ctx) {
+    const primary = costRef(line, ctx);
+    const alt = line.alt && line.alt.refId
+      ? costRef({ kind: 'ingredient', ...line.alt }, ctx)
+      : null;
+
+    // Never silently cost a dish on a broken alternative: fall back to the
+    // primary, but keep `wantsAlt` so the caller can still report the fault.
+    const wantsAlt = Boolean(line.useAlt);
+    const useAlt = wantsAlt && alt !== null && !alt.error;
+    const active = useAlt ? alt : primary;
+
+    return { ...active, primary, alt, useAlt, wantsAlt, hasAlt: alt !== null };
+  }
+
+  /**
    * Cost a whole recipe.
    *
    * batchCost   ingredient cost inflated by batch wastage (cooking loss, spills,
@@ -153,6 +180,38 @@ const Costing = (() => {
     const portions = Number(recipe.portions) > 0 ? Number(recipe.portions) : 1;
     const portionCost = batchCost / portions;
 
+    // Make or buy, rolled up across every line that offers both. Lines with no
+    // alternative are counted identically on both sides, so the comparison is
+    // of whole plates — the chips stay on the plate either way.
+    const swappable = lines.filter((l) => l.hasAlt && !l.alt.error && !l.primary.error);
+    const makeVsBuy = swappable.length
+      ? (() => {
+          const total = (pick) => lines.reduce((sum, l) => {
+            const side = l.hasAlt && !l.alt.error && !l.primary.error ? pick(l) : l;
+            return sum + (side.error ? 0 : side.cost);
+          }, 0) / wastageFactor / portions;
+          const make = total((l) => l.primary);
+          const buy = total((l) => l.alt);
+          return {
+            makeCost: round(make),
+            buyCost: round(buy),
+            difference: round(buy - make),
+            cheaper: Math.abs(buy - make) < 0.005 ? 'level' : buy < make ? 'buy' : 'make',
+            savingPct: make > 0 ? round(((make - buy) / make) * 100, 2) : 0,
+            swappedLines: swappable.map((l) => ({
+              made: l.primary.name, makeCost: round(l.primary.cost),
+              bought: l.alt.name, buyCost: round(l.alt.cost),
+              using: l.useAlt ? 'buy' : 'make',
+            })),
+          };
+        })()
+      : null;
+
+    // What the dish is currently costed on, for display.
+    const sourcing = swappable.length
+      ? (lines.some((l) => l.useAlt) ? 'boughtin' : 'inhouse')
+      : 'inhouse';
+
     const sellPrice = Number(recipe.sellPrice || 0);
     const taxRate = Number(recipe.taxRate == null ? 0 : recipe.taxRate);
     // Menu prices are quoted tax-inclusive in Australian venues; GP is worked
@@ -170,6 +229,9 @@ const Costing = (() => {
     const errors = [
       ...lines.filter((l) => l.error).map((l) => `${l.name}: ${l.error}`),
       ...lines.flatMap((l) => l.nestedErrors || []),
+      // A broken alternative is only a fault if the dish is trying to use it.
+      ...lines.filter((l) => l.hasAlt && l.alt.error && l.wantsAlt)
+        .map((l) => `${l.alt.name}: ${l.alt.error}`),
     ];
 
     return {
@@ -177,6 +239,8 @@ const Costing = (() => {
       name: recipe.name,
       lines,
       errors,
+      sourcing,
+      makeVsBuy,
       ingredientCost: round(ingredientCost),
       wastagePct,
       batchCost: round(batchCost),
@@ -206,7 +270,13 @@ const Costing = (() => {
       ...recipe,
       portions: target,
       batchYieldQty: round(Number(recipe.batchYieldQty || 0) * factor, 3),
-      lines: (recipe.lines || []).map((l) => ({ ...l, qty: round(Number(l.qty) * factor, 4) })),
+      lines: (recipe.lines || []).map((l) => ({
+        ...l,
+        qty: round(Number(l.qty) * factor, 4),
+        // The alternative source has to scale in step, or a scaled recipe would
+        // compare a batch of one against a single portion of the other.
+        ...(l.alt ? { alt: { ...l.alt, qty: round(Number(l.alt.qty) * factor, 4) } } : {}),
+      })),
     };
   }
 

@@ -86,8 +86,40 @@ const shot = async (page, name) => {
   await page.click('tr[data-recipe="rec-parma"]');
   await page.waitForSelector('#editor');
   check('editor loads the recipe', (await page.inputValue('#f-name')) === 'Chicken parmigiana');
-  check('editor shows all recipe lines', (await page.locator('.line-row').count()) === 8);
+  check('editor shows all recipe lines', (await page.locator('.line-row').count()) === 6,
+    `${await page.locator('.line-row').count()} lines`);
   check('no line errors on the sample recipe', (await page.locator('.line-error').count()) === 0);
+
+  // ---- bought-in alternative / make-or-buy ----
+  check('the schnitzel line offers a bought-in alternative',
+    (await page.locator('.alt-row').count()) === 1);
+  check('make-or-buy panel is shown', (await page.locator('.mvb').count()) === 1);
+
+  const mvbValues = await page.locator('.mvb-side .v').allTextContents();
+  check('make-or-buy shows both figures', mvbValues.length === 2, mvbValues.join(' | '));
+  check('make and buy differ', mvbValues[0] !== mvbValues[1], mvbValues.join(' | '));
+  check('make-or-buy counts the whole plate, not just the swapped item',
+    parseFloat(mvbValues[0].replace('$', '')) > 4, mvbValues[0]);
+
+  const costMade = await page.locator('.summary-cell .v').nth(1).textContent();
+  check('starts costed on the in-house build',
+    (await page.locator('.mvb-side.active .k').textContent()) === 'Make in-house');
+
+  await page.click('[data-act="use-buy"]');
+  await page.waitForTimeout(200);
+  const costBought = await page.locator('.summary-cell .v').nth(1).textContent();
+  check('switching to buy changes the portion cost', costMade !== costBought,
+    `${costMade} -> ${costBought}`);
+  check('the active side follows the toggle',
+    (await page.locator('.mvb-side.active .k').textContent()) === 'Buy in finished');
+  check('the comparison itself does not move when the source changes',
+    (await page.locator('.mvb-side .v').allTextContents()).join('|') === mvbValues.join('|'));
+  await shot(page, '05-make-or-buy.png');
+
+  await page.click('[data-act="use-make"]');
+  await page.waitForTimeout(200);
+  check('switching back restores the original cost',
+    (await page.locator('.summary-cell .v').nth(1).textContent()) === costMade);
 
   const summary = await page.locator('.summary-cell .v').allTextContents();
   check('costing panel shows figures', summary.length === 6 && summary[1].startsWith('$'), summary.join(' | '));
@@ -122,6 +154,16 @@ const shot = async (page, name) => {
   await page.waitForSelector('#ing-search');
   check('ingredient library populated', (await page.locator('tbody tr').count()) >= 15);
   check('low-yield items are flagged', (await page.locator('.pill.warn').count()) >= 3);
+  check('finished products are tagged', (await page.locator('.tag.product').count()) === 3,
+    `${await page.locator('.tag.product').count()} tagged`);
+
+  await page.fill('#ing-search', 'GT-SCH');
+  await page.waitForTimeout(150);
+  check('ingredients are searchable by supplier product code',
+    (await page.locator('tbody tr').count()) === 1,
+    `${await page.locator('tbody tr').count()} rows`);
+  await page.fill('#ing-search', '');
+  await page.waitForTimeout(150);
   await shot(page, '03-ingredients.png');
 
   await page.click('tr[data-ingredient="ing-wholebird"]');

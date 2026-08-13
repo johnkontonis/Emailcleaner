@@ -223,5 +223,155 @@ near('12% on chicken moves parma cost by 12% of its chicken content',
 const noChange = Costing.priceImpact({}, { ingredients, recipes: menu });
 ok('an empty change set affects nothing', noChange.affected.length === 0);
 
+console.log('\nBought-in finished products');
+// A premade schnitzel from the supplier: 24 x 180g in a case at $92.00,
+// so $3.8333 each. It is an ordinary ingredient as far as costing goes.
+const premade = {
+  id: 'ing-premade-schnitzel', name: 'Premade crumbed schnitzel 180g',
+  packSize: 24, packUnit: 'ea', packPrice: 92.0, yieldPct: 100,
+  isFinishedProduct: true, supplier: 'G&T Chickens', productCode: 'GT-SCH-180',
+};
+const houseSchnitzel = {
+  id: 'rec-house-schnitzel', name: 'House crumbed schnitzel', onMenu: false,
+  batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
+  lines: [
+    { kind: 'ingredient', refId: 'ing-chicken', qty: 220, unit: 'g' }, // 1.375
+    { kind: 'ingredient', refId: 'ing-flour', qty: 40, unit: 'g' },    // 0.060
+  ],
+};
+// The side that stays on the plate whichever way the schnitzel is sourced.
+const potato = {
+  id: 'ing-potato', name: 'Frozen chips 10mm',
+  packSize: 10, packUnit: 'kg', packPrice: 26.0, yieldPct: 100,
+};
+const ingredientsWithProduct = [...ingredients, premade, potato];
+const HOUSE = 1.435;
+const BOUGHT = 92 / 24;
+const CHIPS = 0.52; // 200g at $2.60/kg
+
+// The plated dish: a schnitzel (made or bought) plus chips.
+const platedRecipe = (useAlt) => ({
+  id: 'rec-plated', name: 'Chicken schnitzel', onMenu: true,
+  batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
+  sellPrice: 26, taxRate: 10, targetGpPct: 70, unitsSold: 100,
+  lines: [
+    {
+      kind: 'recipe', refId: 'rec-house-schnitzel', qty: 1, unit: 'ea',
+      alt: { refId: 'ing-premade-schnitzel', qty: 1, unit: 'ea' },
+      useAlt,
+    },
+    { kind: 'ingredient', refId: 'ing-potato', qty: 200, unit: 'g' },
+  ],
+});
+const platedCtx = (r) => ({
+  ingredients: ingredientsWithProduct,
+  recipes: [houseSchnitzel, r],
+});
+
+const made = Costing.costRecipe(platedRecipe(false), platedCtx(platedRecipe(false)));
+ok('made dish has no errors', made.errors.length === 0, made.errors.join('; '));
+near('made in-house costs the build plus the sides', made.portionCost, HOUSE + CHIPS);
+ok('in-house sourcing is reported', made.sourcing === 'inhouse');
+
+const bought = Costing.costRecipe(platedRecipe(true), platedCtx(platedRecipe(true)));
+near('bought in costs the supplier product plus the sides', bought.portionCost, BOUGHT + CHIPS);
+ok('bought-in sourcing is reported', bought.sourcing === 'boughtin');
+
+// The regression that prompted this model: the sides must survive the swap.
+ok('the chips are still costed when the schnitzel is bought in',
+  bought.portionCost > BOUGHT, `${bought.portionCost} should exceed ${BOUGHT}`);
+near('swapping source moves the cost by exactly the swapped item',
+  bought.portionCost - made.portionCost, BOUGHT - HOUSE);
+
+console.log('\nMake or buy');
+const mvb = made.makeVsBuy;
+ok('comparison is offered when a line has both sources', mvb !== null);
+near('make cost includes the sides', mvb.makeCost, HOUSE + CHIPS);
+near('buy cost includes the sides', mvb.buyCost, BOUGHT + CHIPS);
+ok('cheaper option is identified', mvb.cheaper === 'make', mvb.cheaper);
+ok('saving % is negative when buying costs more', mvb.savingPct < 0, `${mvb.savingPct}`);
+ok('the comparison names both sources', mvb.swappedLines.length === 1
+  && mvb.swappedLines[0].made === 'House crumbed schnitzel'
+  && mvb.swappedLines[0].bought === 'Premade crumbed schnitzel 180g',
+  JSON.stringify(mvb.swappedLines));
+ok('comparison is identical whichever source is active',
+  Math.abs(bought.makeVsBuy.makeCost - mvb.makeCost) < 0.0001
+  && Math.abs(bought.makeVsBuy.buyCost - mvb.buyCost) < 0.0001);
+
+// Undercut the build and the verdict must flip.
+const flipped = Costing.costRecipe(platedRecipe(false), {
+  ingredients: [...ingredients, potato, { ...premade, packPrice: 24.0 }], // $1.00 each
+  recipes: [houseSchnitzel, platedRecipe(false)],
+});
+ok('verdict flips when the supplier undercuts the build',
+  flipped.makeVsBuy.cheaper === 'buy', flipped.makeVsBuy.cheaper);
+ok('saving % is positive when buying is cheaper', flipped.makeVsBuy.savingPct > 0);
+
+const noAlt = Costing.costRecipe(schnitzel, ctx);
+ok('no comparison when no line offers an alternative', noAlt.makeVsBuy === null);
+
+// A dish that is only ever bought in — the supplier product as a plain line.
+const pureBought = {
+  id: 'rec-pure', name: 'Tenders & chips', onMenu: true,
+  batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
+  sellPrice: 19.5, taxRate: 10, targetGpPct: 70, unitsSold: 50,
+  lines: [
+    { kind: 'ingredient', refId: 'ing-premade-schnitzel', qty: 1, unit: 'ea' },
+    { kind: 'ingredient', refId: 'ing-potato', qty: 200, unit: 'g' },
+  ],
+};
+const pure = Costing.costRecipe(pureBought, { ingredients: ingredientsWithProduct, recipes: [pureBought] });
+near('a purely bought-in dish costs with no special handling', pure.portionCost, BOUGHT + CHIPS);
+ok('no comparison offered for a dish with nothing to compare', pure.makeVsBuy === null);
+
+console.log('\nBought-in guard rails');
+const brokenAlt = platedRecipe(true);
+brokenAlt.lines[0].alt = { refId: 'gone', qty: 1, unit: 'ea' };
+const broken = Costing.costRecipe(brokenAlt, platedCtx(brokenAlt));
+ok('a broken alternative is reported',
+  broken.errors.some((e) => e.includes('no longer exists')), broken.errors.join('; '));
+ok('a broken alternative falls back to making it in-house', broken.sourcing === 'inhouse');
+near('the fallback still costs the whole plate', broken.portionCost, HOUSE + CHIPS);
+
+const unusedBrokenAlt = platedRecipe(false);
+unusedBrokenAlt.lines[0].alt = { refId: 'gone', qty: 1, unit: 'ea' };
+ok('a broken alternative the dish is not using is not an error',
+  Costing.costRecipe(unusedBrokenAlt, platedCtx(unusedBrokenAlt)).errors.length === 0);
+
+// Bought in by weight rather than by the each.
+const bulk = { id: 'ing-bulk', name: 'Premade schnitzel bulk', packSize: 5, packUnit: 'kg',
+  packPrice: 62.5, yieldPct: 100, isFinishedProduct: true };
+const byWeight = platedRecipe(true);
+byWeight.lines[0].alt = { refId: 'ing-bulk', qty: 180, unit: 'g' };
+near('an alternative priced by weight costs per portion',
+  Costing.costRecipe(byWeight, {
+    ingredients: [...ingredientsWithProduct, bulk], recipes: [houseSchnitzel, byWeight],
+  }).portionCost, 0.0125 * 180 + CHIPS);
+
+const wasted = { ...platedRecipe(true), wastagePct: 10 };
+near('batch wastage applies to bought-in lines too',
+  Costing.costRecipe(wasted, platedCtx(wasted)).portionCost, (BOUGHT + CHIPS) / 0.9);
+
+const scaledPlate = Costing.scaleRecipe(platedRecipe(true), 4);
+ok('scaling scales the alternative quantity too', scaledPlate.lines[0].alt.qty === 4,
+  `${scaledPlate.lines[0].alt.qty}`);
+near('scaled portion cost is unchanged',
+  Costing.costRecipe(scaledPlate, platedCtx(scaledPlate)).portionCost, BOUGHT + CHIPS, 0.0005);
+
+console.log('\nPrice impact on bought-in products');
+const usingBought = platedRecipe(true);
+const productImpact = Costing.priceImpact({ 'ing-premade-schnitzel': 10 },
+  { ingredients: ingredientsWithProduct, recipes: [houseSchnitzel, usingBought] });
+ok('a supplier rise on a finished product hits the dish using it',
+  productImpact.affected.length === 1, `${productImpact.affected.length} affected`);
+near('the rise flows through at the right size',
+  productImpact.affected[0].costDelta, BOUGHT * 0.1, 0.0005);
+
+const usingHouse = platedRecipe(false);
+ok('a rise on a product the dish is not currently sourcing does not change its cost',
+  Costing.priceImpact({ 'ing-premade-schnitzel': 10 },
+    { ingredients: ingredientsWithProduct, recipes: [houseSchnitzel, usingHouse] }
+  ).affected.length === 0);
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

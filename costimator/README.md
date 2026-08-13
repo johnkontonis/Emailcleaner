@@ -38,6 +38,23 @@ as a 5 kg batch becomes a per-gram component of every dish that uses it, so a
 flour price rise flows through automatically. Set portions per batch and a
 **batch wastage %** for cooking loss.
 
+**Bought-in finished products** — things you buy ready to cook rather than make,
+like a premade crumbed schnitzel from G&T Chickens. Tick *finished product* on
+the ingredient, give it the supplier's product code, and it costs like anything
+else. Use it as a plain recipe line for a dish you never make yourself.
+
+**Make or buy** — where you could do either, put both on the same line: press
+**⇄** and pick the bought-in equivalent. The line then carries a *make / buy*
+switch, and the recipe shows what each way costs per serve and across your
+volumes:
+
+> Making it here is **$0.46** a serve cheaper (11.1%) — **$82.49** across 180 serves.
+
+The swap lives on the line, not the dish, because a plate is rarely only the
+swapped item — buy the schnitzel in and you still serve the chips. Both sides
+count everything else on the plate, so you're comparing whole plates. The
+dashboard flags any dish currently costed on the dearer of its two sources.
+
 **Pricing** — enter the menu price inc GST; GP is worked on the ex-GST price,
 since the GST was never yours. You get GP $, GP %, food cost % and the price
 that would hit your target GP. Dishes below target are flagged.
@@ -85,14 +102,15 @@ sw.js                     # offline cache
 ## Tests
 
 ```bash
-npm test              # costing engine — 56 assertions, no dependencies
+npm test              # costing engine — 86 assertions, no dependencies
 npm run test:browser  # drives the real UI in Chromium (needs: npm install)
 ```
 
 The engine tests are worked longhand — a chef's check of the arithmetic — and
 cover unit conversion, yield inflation, sub-recipe roll-up, wastage, GP and
-target pricing, scaling, menu roll-up and price impact, plus the guard rails
-(circular sub-recipe references, missing items, impossible unit conversions).
+target pricing, scaling, menu roll-up, make-or-buy and price impact, plus the
+guard rails (circular sub-recipe references, missing items, impossible unit
+conversions, broken bought-in references).
 
 If Playwright's bundled Chromium isn't the one you want:
 
@@ -112,3 +130,8 @@ CHROMIUM_PATH=/path/to/chrome npm run test:browser
   margin by the GST rate.
 - **Sub-recipe faults propagate.** A broken line three levels down surfaces on
   the dish that depends on it, instead of quietly costing as zero.
+- **Make-or-buy swaps a line, not a dish.** Swapping the whole recipe would drop
+  the sides from the cost the moment you switched to the bought-in product. The
+  line-level swap keeps the rest of the plate on both sides of the comparison.
+- **A broken bought-in reference falls back to making it.** The dish stays
+  costed and the fault is reported, rather than the menu quietly reading zero.

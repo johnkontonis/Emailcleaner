@@ -16,6 +16,13 @@ const Store = (() => {
       { id: 'ing-breast', name: 'Chicken breast fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 57.5, yieldPct: 96 },
       { id: 'ing-wholebird', name: 'Whole bird size 16', category: 'Poultry', supplier: 'G&T Chickens', packSize: 12, packUnit: 'kg', packPrice: 63.6, yieldPct: 68 },
       { id: 'ing-thigh', name: 'Chicken thigh fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 48.0, yieldPct: 98 },
+      // Finished products — bought in ready to cook, no build required. These
+      // are ordinary ingredients as far as costing goes; the flag just lets the
+      // app group them and offer them as a bought-in source for a dish.
+      { id: 'ing-gt-schnitzel', name: 'Crumbed chicken schnitzel 180g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-SCH-180', packSize: 24, packUnit: 'ea', packPrice: 92.0, yieldPct: 100, isFinishedProduct: true },
+      { id: 'ing-gt-tenders', name: 'Crumbed chicken tenders', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-TEN-5K', packSize: 5, packUnit: 'kg', packPrice: 41.0, yieldPct: 100, isFinishedProduct: true },
+      { id: 'ing-gt-kiev', name: 'Garlic chicken kiev 200g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-KIE-200', packSize: 20, packUnit: 'ea', packPrice: 88.0, yieldPct: 100, isFinishedProduct: true },
+
       { id: 'ing-flour', name: 'Plain flour', category: 'Dry goods', supplier: 'Bidfood', packSize: 12.5, packUnit: 'kg', packPrice: 18.75, yieldPct: 100 },
       { id: 'ing-crumb', name: 'Panko breadcrumb', category: 'Dry goods', supplier: 'Bidfood', packSize: 10, packUnit: 'kg', packPrice: 42.0, yieldPct: 100 },
       { id: 'ing-egg', name: 'Eggs 55g', category: 'Dairy & eggs', supplier: 'Bidfood', packSize: 15, packUnit: 'doz', packPrice: 72.0, yieldPct: 100 },
@@ -50,14 +57,30 @@ const Store = (() => {
         ],
       },
       {
-        id: 'rec-schnitzel', name: 'Chicken schnitzel', type: 'menu', onMenu: true,
-        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 3,
-        sellPrice: 26.0, taxRate: 10, targetGpPct: 70, unitsSold: 180,
-        method: 'Flatten to 10mm, flour, egg wash, crumb. Fry 4 min each side.',
+        // The crumbed cutlet on its own, so the dishes built on it can be
+        // switched between crumbing it here and buying G&T's premade.
+        id: 'rec-house-schnitzel', name: 'House crumbed schnitzel', type: 'sub', onMenu: false,
+        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
+        sellPrice: 0, taxRate: 10, targetGpPct: 70, unitsSold: 0,
+        method: 'Flatten breast to 10mm, flour, egg wash, crumb. Rest 20 min before service.',
         lines: [
           { kind: 'ingredient', refId: 'ing-breast', qty: 220, unit: 'g' },
           { kind: 'recipe', refId: 'rec-crumbmix', qty: 85, unit: 'g' },
           { kind: 'ingredient', refId: 'ing-egg', qty: 1, unit: 'ea' },
+        ],
+      },
+      {
+        id: 'rec-schnitzel', name: 'Chicken schnitzel', type: 'menu', onMenu: true,
+        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 3,
+        sellPrice: 26.0, taxRate: 10, targetGpPct: 70, unitsSold: 180,
+        method: 'Fry 4 min each side. Serve with chips and lemon.',
+        lines: [
+          // Made here by default; flip useAlt to cost it on G&T's premade
+          // instead. The chips below stay on the plate either way.
+          {
+            kind: 'recipe', refId: 'rec-house-schnitzel', qty: 1, unit: 'ea',
+            alt: { refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' }, useAlt: false,
+          },
           { kind: 'ingredient', refId: 'ing-oil', qty: 40, unit: 'ml' },
           { kind: 'ingredient', refId: 'ing-potato', qty: 200, unit: 'g' },
         ],
@@ -68,9 +91,10 @@ const Store = (() => {
         sellPrice: 29.5, taxRate: 10, targetGpPct: 70, unitsSold: 380,
         method: 'Cook schnitzel, top with napoli, ham and mozzarella. Grill to melt.',
         lines: [
-          { kind: 'ingredient', refId: 'ing-breast', qty: 220, unit: 'g' },
-          { kind: 'recipe', refId: 'rec-crumbmix', qty: 85, unit: 'g' },
-          { kind: 'ingredient', refId: 'ing-egg', qty: 1, unit: 'ea' },
+          {
+            kind: 'recipe', refId: 'rec-house-schnitzel', qty: 1, unit: 'ea',
+            alt: { refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' }, useAlt: false,
+          },
           { kind: 'ingredient', refId: 'ing-oil', qty: 40, unit: 'ml' },
           { kind: 'ingredient', refId: 'ing-napoli', qty: 80, unit: 'ml' },
           { kind: 'ingredient', refId: 'ing-ham', qty: 45, unit: 'g' },
@@ -106,6 +130,18 @@ const Store = (() => {
           { kind: 'ingredient', refId: 'ing-salt', qty: 8, unit: 'g' },
           { kind: 'ingredient', refId: 'ing-pepper', qty: 3, unit: 'g' },
           { kind: 'ingredient', refId: 'ing-potato', qty: 200, unit: 'g' },
+        ],
+      },
+      {
+        // Nothing is made here — the dish is the supplier's product plus chips.
+        id: 'rec-tenders', name: 'Chicken tenders & chips', type: 'menu', onMenu: true,
+        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
+        sellPrice: 19.5, taxRate: 10, targetGpPct: 70, unitsSold: 145,
+        method: 'Fry from frozen, 4 min at 180C. Serve with chips and aioli.',
+        lines: [
+          { kind: 'ingredient', refId: 'ing-gt-tenders', qty: 200, unit: 'g' },
+          { kind: 'ingredient', refId: 'ing-potato', qty: 200, unit: 'g' },
+          { kind: 'ingredient', refId: 'ing-mayo', qty: 25, unit: 'ml' },
         ],
       },
       {
