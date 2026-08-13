@@ -22,14 +22,50 @@ const Costing = (() => {
   };
 
   /**
+   * The supplier offer an ingredient is currently bought on.
+   *
+   * An ingredient is the thing you use; an offer is a product you can buy to
+   * satisfy it. Several suppliers may compete for the same ingredient, so the
+   * pack configuration and price live on the offer, not the ingredient.
+   *
+   * Ingredients saved before offers existed keep their pack fields inline, and
+   * are read here as a single unnamed offer so nothing needs re-entering.
+   */
+  function activeOffer(ingredient) {
+    const offers = (ingredient.offers || []).filter((o) => o && !o.discontinued);
+    if (!offers.length) {
+      return {
+        id: null,
+        supplier: ingredient.supplier || '',
+        productCode: ingredient.productCode || '',
+        packSize: ingredient.packSize,
+        packUnit: ingredient.packUnit,
+        packPrice: ingredient.packPrice,
+        unitSize: ingredient.unitSize,
+        unitSizeUnit: ingredient.unitSizeUnit,
+        agreedPrice: ingredient.agreedPrice,
+      };
+    }
+    return offers.find((o) => o.id === ingredient.preferredOfferId) || offers[0];
+  }
+
+  /**
+   * Cost of one base unit (g / ml / ea) of a supplier offer, before yield loss.
+   * `label` only shapes the error message.
+   */
+  function offerUnitCost(offer, label = 'This item') {
+    const packQty = Number(offer && offer.packSize);
+    const packPrice = Number(offer && offer.packPrice);
+    if (!(packQty > 0)) throw new Error(`"${label}" has no pack size.`);
+    const base = U.toBase(packQty, offer.packUnit);
+    return { cost: packPrice / base.qty, unit: base.unit };
+  }
+
+  /**
    * Cost of one base unit (g / ml / ea) of an ingredient, before yield loss.
    */
   function unitCost(ingredient) {
-    const packQty = Number(ingredient.packSize);
-    const packPrice = Number(ingredient.packPrice);
-    if (!(packQty > 0)) throw new Error(`"${ingredient.name}" has no pack size.`);
-    const base = U.toBase(packQty, ingredient.packUnit);
-    return { cost: packPrice / base.qty, unit: base.unit };
+    return offerUnitCost(activeOffer(ingredient), ingredient.name);
   }
 
   /**
@@ -325,6 +361,25 @@ const Costing = (() => {
     };
   }
 
+  /** Move an ingredient's price by a factor, on whichever offer it is bought on. */
+  function repriceIngredient(ingredient, factor) {
+    const offers = ingredient.offers || [];
+    if (!offers.length) {
+      return { ...ingredient, packPrice: Number(ingredient.packPrice) * factor };
+    }
+    const active = activeOffer(ingredient);
+    return {
+      ...ingredient,
+      offers: offers.map((o) =>
+        o.id === active.id ? { ...o, packPrice: Number(o.packPrice) * factor } : o),
+    };
+  }
+
+  /** The same ingredient, bought on a different offer. */
+  function switchOffer(ingredient, offerId) {
+    return { ...ingredient, preferredOfferId: offerId };
+  }
+
   /**
    * Apply a supplier price movement across the ingredient library and report
    * which dishes fall through their target GP as a result. This is the
@@ -334,7 +389,7 @@ const Costing = (() => {
     const updated = ctx.ingredients.map((ing) => {
       const change = changes[ing.id];
       if (change == null) return ing;
-      return { ...ing, packPrice: Number(ing.packPrice) * (1 + Number(change) / 100) };
+      return repriceIngredient(ing, 1 + Number(change) / 100);
     });
 
     const before = analyseMenu(ctx.recipes, ctx);
@@ -371,8 +426,9 @@ const Costing = (() => {
   }
 
   return {
-    round, unitCost, yieldedUnitCost, recipeUnitCost,
-    costLine, costRecipe, scaleRecipe, analyseMenu, priceImpact,
+    round, activeOffer, offerUnitCost, unitCost, yieldedUnitCost, recipeUnitCost,
+    repriceIngredient, switchOffer,
+    costRef, costLine, costRecipe, scaleRecipe, analyseMenu, priceImpact,
   };
 })();
 

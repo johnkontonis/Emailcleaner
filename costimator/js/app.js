@@ -598,33 +598,41 @@
     const list = Store.ingredients()
       .filter((i) => !term
         || i.name.toLowerCase().includes(term)
-        || (i.supplier || '').toLowerCase().includes(term)
-        || (i.productCode || '').toLowerCase().includes(term))
+        || (i.offers || []).some((o) =>
+          (o.supplier || '').toLowerCase().includes(term)
+          || (o.productCode || '').toLowerCase().includes(term)))
       .slice().sort((a, b) => a.name.localeCompare(b.name));
 
     const rows = list.map((i) => {
+      const offer = Costing.activeOffer(i);
+      const offerCount = (i.offers || []).length;
       let costCell = '<span style="color:var(--bad)">—</span>';
       let perUnit = '';
       try {
         const y = Costing.yieldedUnitCost(i);
         // Show the rate in the unit people buy in, not raw base units.
-        const dim = Units.dimensionOf(i.packUnit);
+        const dim = Units.dimensionOf(offer.packUnit);
         const showUnit = dim === 'mass' ? 'kg' : dim === 'volume' ? 'l' : 'ea';
-        const perShow = y.cost * Units.toBase(1, showUnit).qty;
-        costCell = money(perShow, 3);
+        costCell = money(y.cost * Units.toBase(1, showUnit).qty, 3);
         perUnit = `per ${Units.unitLabel(showUnit)}`;
       } catch (err) {
         perUnit = err.message;
       }
       const yieldPct = i.yieldPct == null ? 100 : i.yieldPct;
+      // Paying something other than what was agreed is worth seeing in the list.
+      const offAgreed = offer.agreedPrice != null
+        && Math.abs(Number(offer.agreedPrice) - Number(offer.packPrice)) > 0.005;
       return `
         <tr class="clickable" data-ingredient="${esc(i.id)}">
           <td class="name-cell">${esc(i.name)}
             ${i.isFinishedProduct ? '<span class="tag product">finished product</span>' : ''}
-            <span class="sub-note">${esc(i.supplier || 'No supplier')}${
-              i.productCode ? ` · ${esc(i.productCode)}` : ''}${i.category ? ` · ${esc(i.category)}` : ''}</span></td>
-          <td class="num">${esc(i.packSize)} ${esc(Units.unitLabel(i.packUnit))}</td>
-          <td class="num">${money(i.packPrice)}</td>
+            ${offerCount > 1 ? `<span class="tag">${offerCount} suppliers</span>` : ''}
+            <span class="sub-note">${esc(offer.supplier || 'No supplier')}${
+              offer.productCode ? ` · ${esc(offer.productCode)}` : ''}${
+              i.category ? ` · ${esc(i.category)}` : ''}</span></td>
+          <td class="num">${esc(offer.packSize)} ${esc(Units.unitLabel(offer.packUnit))}</td>
+          <td class="num">${money(offer.packPrice)}${offAgreed
+            ? `<span class="sub-note" style="color:var(--warn)">agreed ${money(offer.agreedPrice)}</span>` : ''}</td>
           <td class="num">${yieldPct < 100 ? `<span class="pill warn">${pct(yieldPct, 0)}</span>` : `${pct(yieldPct, 0)}`}</td>
           <td class="num">${costCell}<span class="sub-note">${esc(perUnit)}</span></td>
           <td class="num"><button class="icon-btn" data-act="del-ingredient" data-id="${esc(i.id)}" title="Delete">✕</button></td>
@@ -660,131 +668,415 @@
     });
   }
 
+  // ---------- ingredient editor ----------
+
+  let ingDraft = null;
+
   function openIngredientEditor(id) {
-    const ing = id ? structuredClone(Store.getIngredient(id)) : {
-      id: null, name: '', category: '', supplier: '', packSize: 1, packUnit: 'kg', packPrice: 0, yieldPct: 100,
+    ingDraft = id ? structuredClone(Store.getIngredient(id)) : {
+      id: null, name: '', category: '', yieldPct: 100,
+      offers: [{
+        id: Store.uid('off'), supplier: '', productCode: '',
+        packSize: 1, packUnit: 'kg', packPrice: 0, agreedPrice: null,
+      }],
     };
-    if (!ing) return;
+    if (!ingDraft) return;
+    if (!ingDraft.offers || !ingDraft.offers.length) {
+      // Shouldn't happen post-migration, but never open an unpriceable editor.
+      ingDraft.offers = [{ id: Store.uid('off'), supplier: '', productCode: '', packSize: 1, packUnit: 'kg', packPrice: 0 }];
+    }
+    if (!ingDraft.preferredOfferId) ingDraft.preferredOfferId = ingDraft.offers[0].id;
 
     openModal(
       id ? 'Edit ingredient' : 'New ingredient',
-      `<div class="field">
-         <label for="i-name">Name</label>
-         <input id="i-name" value="${esc(ing.name)}" placeholder="e.g. Chicken breast fillet">
-       </div>
-       <div class="field-row">
-         <div class="field"><label for="i-supplier">Supplier</label>
-           <input id="i-supplier" value="${esc(ing.supplier || '')}"></div>
-         <div class="field"><label for="i-code">Supplier product code</label>
-           <input id="i-code" value="${esc(ing.productCode || '')}" placeholder="optional"></div>
-         <div class="field"><label for="i-category">Category</label>
-           <input id="i-category" value="${esc(ing.category || '')}"></div>
-       </div>
-       <label class="checkline">
-         <input type="checkbox" id="i-finished" ${ing.isFinishedProduct ? 'checked' : ''}>
-         Finished product — bought in ready to serve or cook
-       </label>
-       <p class="field-hint" style="margin:-8px 0 14px">
-         Costs exactly like any other ingredient. Marking it lets the app offer it
-         as a bought-in alternative to something you make yourself.
-       </p>
-       <div class="field-row">
-         <div class="field"><label for="i-packsize">Pack size</label>
-           <input id="i-packsize" type="number" step="any" min="0" value="${esc(ing.packSize)}"></div>
-         <div class="field"><label for="i-packunit">Pack unit</label>
-           <select id="i-packunit">${unitOptions(Units.normaliseUnit(ing.packUnit))}</select></div>
-         <div class="field"><label for="i-packprice">Pack price</label>
-           <input id="i-packprice" type="number" step="0.01" min="0" value="${esc(ing.packPrice)}"></div>
-       </div>
-       <div class="field-row">
-         <div class="field"><label for="i-yield">Yield %</label>
-           <input id="i-yield" type="number" step="any" min="1" max="100" value="${esc(ing.yieldPct == null ? 100 : ing.yieldPct)}">
-           <span class="field-hint">Usable portion after trim, peel or bone-out.</span></div>
-         <div class="field"><label for="i-density">Density g/ml</label>
-           <input id="i-density" type="number" step="any" min="0" value="${esc(ing.density || '')}" placeholder="optional">
-           <span class="field-hint">Only needed to cost this by weight when bought by volume, or the reverse.</span></div>
-       </div>
-       <div id="i-preview" class="summary-grid"></div>`,
+      '<div id="ing-editor"></div>',
       `<button class="btn" data-close>Cancel</button>
        <button class="btn primary" data-act="save-ingredient">Save ingredient</button>`,
-      (body) => {
-        const read = () => ({
-          ...ing,
-          name: $('#i-name').value.trim(),
-          supplier: $('#i-supplier').value.trim(),
-          productCode: $('#i-code').value.trim(),
-          category: $('#i-category').value.trim(),
-          isFinishedProduct: $('#i-finished').checked,
-          packSize: Number($('#i-packsize').value),
-          packUnit: $('#i-packunit').value,
-          packPrice: Number($('#i-packprice').value),
-          yieldPct: Number($('#i-yield').value),
-          density: $('#i-density').value ? Number($('#i-density').value) : undefined,
-        });
-
-        const preview = () => {
-          const data = read();
-          try {
-            const raw = Costing.unitCost(data);
-            const yielded = Costing.yieldedUnitCost(data);
-            const dim = Units.dimensionOf(data.packUnit);
-            const showUnit = dim === 'mass' ? 'kg' : dim === 'volume' ? 'l' : 'ea';
-            const factor = Units.toBase(1, showUnit).qty;
-            $('#i-preview').innerHTML = `
-              <div class="summary-cell"><div class="k">Cost per ${Units.unitLabel(showUnit)}</div>
-                <div class="v">${money(raw.cost * factor, 3)}</div></div>
-              <div class="summary-cell"><div class="k">Yielded per ${Units.unitLabel(showUnit)}</div>
-                <div class="v">${money(yielded.cost * factor, 3)}</div></div>
-              <div class="summary-cell"><div class="k">Lost to trim</div>
-                <div class="v">${pct(100 - (data.yieldPct || 100), 0)}</div></div>`;
-          } catch (err) {
-            $('#i-preview').innerHTML = `<div class="banner bad" style="margin:0">${esc(err.message)}</div>`;
-          }
-        };
-
-        $$('input, select', body).forEach((el) =>
-          el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', preview));
-        preview();
-
-        modalOnSave = () => {
-          const data = read();
-          if (!data.name) { toast('Give the ingredient a name.'); return; }
-          if (!(data.packSize > 0)) { toast('Pack size must be greater than zero.'); return; }
-          if (!(data.yieldPct > 0 && data.yieldPct <= 100)) { toast('Yield must be between 1 and 100%.'); return; }
-          Store.upsertIngredient(data.id ? data : { ...data, id: undefined });
-          closeModal();
-          toast('Ingredient saved.');
-          render();
-        };
-      }
+      () => renderIngredientEditor()
     );
   }
 
-  // ================= PRICE IMPACT =================
+  function renderIngredientEditor() {
+    const d = ingDraft;
+    const supplierList = Store.suppliers().map((s) => esc(s.name));
+
+    const offerRows = d.offers.map((o, idx) => {
+      const norm = Suppliers.normaliseOffer(o, d);
+      const isActive = o.id === d.preferredOfferId;
+      return `
+        <div class="offer${isActive ? ' active' : ''}">
+          <div class="offer-head">
+            <input list="supplier-names" data-offer="${idx}" data-f="supplier"
+                   value="${esc(o.supplier || '')}" placeholder="Supplier">
+            <input data-offer="${idx}" data-f="productCode"
+                   value="${esc(o.productCode || '')}" placeholder="Product code">
+            <button type="button" class="btn small ${isActive ? 'primary' : ''}"
+                    data-act="use-offer" data-offer="${idx}">
+              ${isActive ? 'buying this' : 'use this'}
+            </button>
+            <button class="icon-btn" data-act="del-offer" data-offer="${idx}" title="Remove">✕</button>
+          </div>
+          <div class="offer-grid">
+            <label>Pack size
+              <input type="number" step="any" min="0" data-offer="${idx}" data-f="packSize" value="${esc(o.packSize)}"></label>
+            <label>Unit
+              <select data-offer="${idx}" data-f="packUnit">${unitOptions(Units.normaliseUnit(o.packUnit))}</select></label>
+            <label>Pack price
+              <input type="number" step="0.01" min="0" data-offer="${idx}" data-f="packPrice" value="${esc(o.packPrice)}"></label>
+            <label>Agreed price
+              <input type="number" step="0.01" min="0" data-offer="${idx}" data-f="agreedPrice"
+                     value="${o.agreedPrice == null ? '' : esc(o.agreedPrice)}" placeholder="none"></label>
+            <label>Piece size
+              <input type="number" step="any" min="0" data-offer="${idx}" data-f="unitSize"
+                     value="${o.unitSize == null ? '' : esc(o.unitSize)}" placeholder="optional"></label>
+            <label>Piece unit
+              <select data-offer="${idx}" data-f="unitSizeUnit">${unitOptions(Units.normaliseUnit(o.unitSizeUnit) || 'g')}</select></label>
+          </div>
+          <div class="offer-rates">
+            ${norm.error
+              ? `<span style="color:var(--bad)">${esc(norm.error)}</span>`
+              : `${norm.perRate != null ? `<span><b>${money(norm.perRate, 2)}</b> per ${esc(Units.unitLabel(norm.rateUnit))}</span>` : ''}
+                 ${norm.perPiece != null ? `<span><b>${money(norm.perPiece, 3)}</b> per piece</span>` : ''}
+                 ${o.agreedPrice != null && Number(o.agreedPrice) !== Number(o.packPrice)
+                   ? `<span class="pill warn">invoice price differs from agreed</span>` : ''}`}
+          </div>
+        </div>`;
+    }).join('');
+
+    const cmp = Suppliers.compareOffers(d);
+
+    $('#ing-editor').innerHTML = `
+      <datalist id="supplier-names">${supplierList.map((n) => `<option value="${n}">`).join('')}</datalist>
+
+      <div class="field">
+        <label for="i-name">Name</label>
+        <input id="i-name" data-i="name" value="${esc(d.name)}" placeholder="e.g. Crumbed chicken schnitzel">
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="i-category">Category</label>
+          <input id="i-category" data-i="category" value="${esc(d.category || '')}"></div>
+        <div class="field"><label for="i-yield">Yield %</label>
+          <input id="i-yield" type="number" step="any" min="1" max="100" data-i="yieldPct"
+                 value="${esc(d.yieldPct == null ? 100 : d.yieldPct)}">
+          <span class="field-hint">Usable after trim or bone-out.</span></div>
+        <div class="field"><label for="i-density">Density g/ml</label>
+          <input id="i-density" type="number" step="any" min="0" data-i="density"
+                 value="${esc(d.density || '')}" placeholder="optional"></div>
+      </div>
+      <label class="checkline">
+        <input type="checkbox" id="i-finished" data-i="isFinishedProduct" ${d.isFinishedProduct ? 'checked' : ''}>
+        Finished product — bought in ready to serve or cook
+      </label>
+
+      <div class="section-title">Supplier prices</div>
+      <p class="field-hint" style="margin:-4px 0 12px">
+        One entry per supplier who can supply this. <strong>Agreed price</strong> is what
+        you contracted to pay — invoices are checked against it. <strong>Piece size</strong>
+        lets a 300g piece be compared honestly against a 250g one.
+      </p>
+      ${offerRows}
+      <button class="btn small" data-act="add-offer">+ Add supplier price</button>
+
+      ${cmp ? offerComparisonPanel(cmp, d) : ''}`;
+
+    wireIngredientEditor();
+  }
+
+  /**
+   * Side-by-side comparison, plus what switching would actually be worth.
+   *
+   * Cost per kilo and cost per piece are shown separately and never blended:
+   * when the pieces are different sizes they can name different winners, and
+   * that disagreement is the whole decision.
+   */
+  function offerComparisonPanel(cmp, ingredient) {
+    const rows = cmp.rows.filter((r) => !r.error).map((r) => {
+      const isCurrent = r.id === cmp.current.id;
+      const bestRate = cmp.cheapestByRate && r.id === cmp.cheapestByRate.id;
+      const bestPiece = cmp.cheapestByPiece && r.id === cmp.cheapestByPiece.id;
+      return `
+        <tr${isCurrent ? ' class="current"' : ''}>
+          <td class="name-cell">${esc(r.supplier || '—')}
+            <span class="sub-note">${esc(r.productCode || '')}${isCurrent ? ' · currently buying' : ''}</span></td>
+          <td class="num">${r.pieceSize != null ? `${r.pieceSize}${esc(Units.unitLabel(r.pieceUnit))}` : '—'}</td>
+          <td class="num">${money(r.packPrice)}</td>
+          <td class="num">${r.perRate != null
+            ? `${money(r.perRate, 2)}${bestRate ? ' <span class="pill good">best</span>' : ''}` : '—'}</td>
+          <td class="num">${r.perPiece != null
+            ? `${money(r.perPiece, 3)}${bestPiece ? ' <span class="pill good">best</span>' : ''}` : '—'}</td>
+          <td class="num">${isCurrent ? '' :
+            `<button class="btn small" data-act="switch-preview" data-offer-id="${esc(r.id)}">what if?</button>`}</td>
+        </tr>`;
+    }).join('');
+
+    const warning = cmp.pieceWinnerDiffers ? `
+      <div class="banner warn" style="margin:12px 0 0">
+        <strong>${esc(cmp.cheapestByPiece.supplier)}</strong> is cheaper per piece but
+        <strong>${esc(cmp.cheapestByRate.supplier)}</strong> is cheaper per kilo — the pieces
+        are different sizes, so the cheaper piece is a smaller serve, not cheaper chicken.
+      </div>` : '';
+
+    return `
+      <div class="section-title">Supplier comparison</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Supplier</th><th class="num">Piece</th><th class="num">Pack price</th>
+            <th class="num">Per unit</th><th class="num">Per piece</th><th class="num"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${warning}
+      <div id="switch-preview"></div>`;
+  }
+
+  /**
+   * What a switch is worth once volumes are counted. A cent a serve on a dish
+   * nobody orders is noise; the same cent on the best seller is the decision.
+   */
+  function renderSwitchPreview(offerId) {
+    const target = $('#switch-preview');
+    if (!target) return;
+
+    let impact;
+    try {
+      const ctx = Store.ctx();
+      // Cost against the unsaved draft, so edits in this modal are reflected.
+      const ingredients = ctx.ingredients.some((i) => i.id === ingDraft.id)
+        ? ctx.ingredients.map((i) => (i.id === ingDraft.id ? ingDraft : i))
+        : [...ctx.ingredients, ingDraft];
+      impact = Suppliers.switchImpact(ingDraft.id, offerId, { ...ctx, ingredients });
+    } catch (err) {
+      target.innerHTML = `<div class="banner bad">${esc(err.message)}</div>`;
+      return;
+    }
+
+    if (!impact.dishes.length) {
+      target.innerHTML = `<div class="banner warn">
+        Nothing on the menu uses this yet, so switching changes no dish cost.
+      </div>`;
+      return;
+    }
+
+    const saving = impact.saving;
+    const dishRows = impact.dishes.map((dish) => `
+      <tr>
+        <td class="name-cell">${esc(dish.name)}
+          ${dish.isTopSeller ? '<span class="tag seller">best seller</span>' : ''}
+          ${impact.concentratedOn && dish.id === impact.concentratedOn.id && !dish.isTopSeller
+            ? '<span class="tag seller">carries most of it</span>' : ''}
+          <span class="sub-note">#${dish.volumeRank} of ${dish.menuSize} by volume</span></td>
+        <td class="num">${dish.unitsSold || '—'}</td>
+        <td class="num">${money(dish.costBefore)}</td>
+        <td class="num">${money(dish.costAfter)}</td>
+        <td class="num" style="color:${dish.perServe < 0 ? 'var(--good)' : 'var(--bad)'}">
+          ${dish.perServe > 0 ? '+' : ''}${money(dish.perServe, 3)}</td>
+        <td class="num" style="color:${dish.periodDelta < 0 ? 'var(--good)' : 'var(--bad)'}">
+          ${dish.periodDelta > 0 ? '+' : ''}${money(dish.periodDelta)}</td>
+        <td class="num">${pct(dish.shareOfChange, 0)}</td>
+      </tr>`).join('');
+
+    const spec = impact.specChange;
+    const verdict = {
+      'costs-more': `Switching to ${esc(impact.to.supplier)} <strong>costs ${money(-saving)} more</strong>
+                     across current volumes.`,
+      saves: `Switching to ${esc(impact.to.supplier)} saves <strong>${money(saving)}</strong>
+              across current volumes, at the same piece size.`,
+      'saves-but-smaller': `Switching to ${esc(impact.to.supplier)} saves <strong>${money(saving)}</strong>,
+              but the piece drops from ${spec ? `${spec.fromSize}${esc(Units.unitLabel(spec.fromUnit))}` : ''}
+              to ${spec ? `${spec.toSize}${esc(Units.unitLabel(spec.toUnit))}` : ''}
+              (${spec ? pct(Math.abs(spec.deltaPct)) : ''} smaller) — that is a visible cut, not a free saving.`,
+    }[impact.verdict];
+
+    // Where the change lands matters as much as its size: a saving riding on
+    // one dish is a spec change to that dish, whatever the total says.
+    const c = impact.concentratedOn;
+    const exposure = c && impact.concentration >= 40 ? `
+      <div class="banner ${impact.verdict === 'saves-but-smaller' ? 'bad' : 'warn'}" style="margin:12px 0 0">
+        <strong>${pct(impact.concentration, 0)}</strong> of the change lands on
+        <strong>${esc(c.name)}</strong> — #${c.volumeRank} of ${c.menuSize} by volume,
+        ${c.unitsSold} sold.
+        ${impact.verdict === 'saves-but-smaller'
+          ? ` You are really deciding whether to put a ${
+              impact.specChange ? `${impact.specChange.toSize}${esc(Units.unitLabel(impact.specChange.toUnit))}` : 'smaller'
+            } piece on that dish to save ${money(Math.abs(c.periodDelta))} on it.`
+          : ''}
+      </div>` : '';
+
+    target.innerHTML = `
+      <div class="section-title">If you switched to ${esc(impact.to.supplier || 'this supplier')}</div>
+      <div class="stat-grid" style="margin-bottom:12px">
+        <div class="stat"><div class="stat-label">Across current volumes</div>
+          <div class="stat-value ${saving > 0 ? 'good' : 'bad'}">${saving > 0 ? '' : '−'}${money(Math.abs(saving))}</div>
+          <div class="stat-note">${saving > 0 ? 'saved' : 'extra cost'}</div></div>
+        <div class="stat"><div class="stat-label">Weighted GP</div>
+          <div class="stat-value">${pct(impact.gpAfter)}</div>
+          <div class="stat-note">from ${pct(impact.gpBefore)}</div></div>
+        <div class="stat"><div class="stat-label">Piece size</div>
+          <div class="stat-value ${spec && spec.smaller ? 'warn' : ''}">${
+            impact.to.pieceSize != null ? `${impact.to.pieceSize}${esc(Units.unitLabel(impact.to.pieceUnit))}` : '—'}</div>
+          <div class="stat-note">${spec ? `was ${spec.fromSize}${esc(Units.unitLabel(spec.fromUnit))}` : 'unchanged'}</div></div>
+      </div>
+      <p class="mvb-verdict">${verdict}</p>
+      ${exposure}
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Dish</th><th class="num">Sold</th><th class="num">Cost now</th>
+            <th class="num">After</th><th class="num">Per serve</th><th class="num">Period</th>
+            <th class="num">Share</th></tr></thead>
+          <tbody>${dishRows}</tbody>
+        </table>
+      </div>`;
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function wireIngredientEditor() {
+    const editor = $('#ing-editor');
+
+    $$('[data-i]', editor).forEach((el) => {
+      const evt = el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input';
+      el.addEventListener(evt, () => {
+        const f = el.dataset.i;
+        if (el.type === 'checkbox') ingDraft[f] = el.checked;
+        else if (f === 'yieldPct') ingDraft[f] = Number(el.value);
+        else if (f === 'density') ingDraft[f] = el.value ? Number(el.value) : undefined;
+        else ingDraft[f] = el.value;
+        // Names are typed a character at a time; re-rendering would eat the caret.
+        if (f === 'name' || f === 'category') return;
+        renderIngredientEditor();
+      });
+    });
+
+    $$('[data-offer]', editor).forEach((el) => {
+      if (el.tagName === 'BUTTON') return;
+      el.addEventListener('change', () => {
+        const offer = ingDraft.offers[Number(el.dataset.offer)];
+        const f = el.dataset.f;
+        const numeric = ['packSize', 'packPrice', 'agreedPrice', 'unitSize'];
+        if (numeric.includes(f)) offer[f] = el.value === '' ? null : Number(el.value);
+        else offer[f] = el.value;
+        renderIngredientEditor();
+      });
+    });
+
+    editor.onclick = (e) => {
+      const offerBtn = (sel) => {
+        const el = e.target.closest(sel);
+        return el ? Number(el.dataset.offer) : null;
+      };
+
+      if (e.target.closest('[data-act="add-offer"]')) {
+        const from = ingDraft.offers[0];
+        ingDraft.offers.push({
+          id: Store.uid('off'), supplier: '', productCode: '',
+          packSize: from.packSize, packUnit: from.packUnit, packPrice: from.packPrice,
+          agreedPrice: null, unitSize: from.unitSize, unitSizeUnit: from.unitSizeUnit,
+        });
+        renderIngredientEditor();
+        return;
+      }
+
+      const use = offerBtn('[data-act="use-offer"]');
+      if (use !== null) {
+        ingDraft.preferredOfferId = ingDraft.offers[use].id;
+        renderIngredientEditor();
+        return;
+      }
+
+      const del = offerBtn('[data-act="del-offer"]');
+      if (del !== null) {
+        if (ingDraft.offers.length <= 1) { toast('An ingredient needs at least one supplier price.'); return; }
+        const [removed] = ingDraft.offers.splice(del, 1);
+        if (ingDraft.preferredOfferId === removed.id) ingDraft.preferredOfferId = ingDraft.offers[0].id;
+        renderIngredientEditor();
+        return;
+      }
+
+      const preview = e.target.closest('[data-act="switch-preview"]');
+      if (preview) renderSwitchPreview(preview.dataset.offerId);
+    };
+
+    modalOnSave = () => {
+      if (!ingDraft.name.trim()) { toast('Give the ingredient a name.'); return; }
+      if (!(Number(ingDraft.yieldPct) > 0 && Number(ingDraft.yieldPct) <= 100)) {
+        toast('Yield must be between 1 and 100%.'); return;
+      }
+      for (const o of ingDraft.offers) {
+        if (!(Number(o.packSize) > 0)) {
+          toast(`Pack size for ${o.supplier || 'a supplier price'} must be greater than zero.`);
+          return;
+        }
+      }
+      Store.upsertIngredient(ingDraft.id ? ingDraft : { ...ingDraft, id: undefined });
+      // Any supplier typed in here should exist as a record to email later.
+      for (const o of ingDraft.offers) {
+        if (o.supplier && !Store.supplierByName(o.supplier)) {
+          Store.upsertSupplier({ name: o.supplier.trim(), email: '' });
+        }
+      }
+      closeModal();
+      toast('Ingredient saved.');
+      render();
+    };
+  }
+
+  // ================= SUPPLIERS =================
 
   let impactChanges = {};
 
-  function renderImpact() {
+  function renderSuppliers() {
     const ctx = Store.ctx();
     const result = Costing.priceImpact(impactChanges, ctx);
     const changed = Object.keys(impactChanges).filter((k) => Number(impactChanges[k]) !== 0);
 
+    // Who supplies what, and how much of your spend sits with each of them.
+    const spend = new Map();
+    for (const ing of ctx.ingredients) {
+      const offer = Costing.activeOffer(ing);
+      const name = (offer.supplier || 'Unassigned').trim() || 'Unassigned';
+      spend.set(name, (spend.get(name) || 0) + 1);
+    }
+
+    const supplierRows = Store.suppliers()
+      .slice().sort((a, b) => a.name.localeCompare(b.name))
+      .map((s) => {
+        const lines = spend.get(s.name) || 0;
+        const missingAgreed = ctx.ingredients.filter((i) =>
+          (i.offers || []).some((o) => o.supplier === s.name && o.agreedPrice == null)).length;
+        return `
+          <tr>
+            <td class="name-cell">${esc(s.name)}
+              ${missingAgreed ? `<span class="sub-note" style="color:var(--warn)">${missingAgreed} product${
+                missingAgreed > 1 ? 's' : ''} with no agreed price</span>` : ''}</td>
+            <td><input type="email" data-supplier="${esc(s.id)}" value="${esc(s.email || '')}"
+                       placeholder="accounts@supplier.com"></td>
+            <td class="num">${lines}</td>
+            <td class="num"><button class="icon-btn" data-act="del-supplier" data-id="${esc(s.id)}" title="Remove">✕</button></td>
+          </tr>`;
+      }).join('');
+
     const inputs = ctx.ingredients
       .slice().sort((a, b) => a.name.localeCompare(b.name))
-      .map((i) => `
-        <div class="line-row" style="grid-template-columns:1fr 110px">
-          <label for="ch-${esc(i.id)}" style="font-size:14px">${esc(i.name)}
-            <span class="sub-note">${esc(i.supplier || '')} · ${money(i.packPrice)} / ${esc(i.packSize)}${esc(Units.unitLabel(i.packUnit))}</span></label>
-          <input id="ch-${esc(i.id)}" type="number" step="any" data-change="${esc(i.id)}"
-                 value="${esc(impactChanges[i.id] ?? '')}" placeholder="0%">
-        </div>`).join('');
+      .map((i) => {
+        const o = Costing.activeOffer(i);
+        return `
+          <div class="line-row" style="grid-template-columns:1fr 110px">
+            <label for="ch-${esc(i.id)}" style="font-size:14px">${esc(i.name)}
+              <span class="sub-note">${esc(o.supplier || '')} · ${money(o.packPrice)} / ${
+                esc(o.packSize)}${esc(Units.unitLabel(o.packUnit))}</span></label>
+            <input id="ch-${esc(i.id)}" type="number" step="any" data-change="${esc(i.id)}"
+                   value="${esc(impactChanges[i.id] ?? '')}" placeholder="0%">
+          </div>`;
+      }).join('');
 
     const rows = result.affected.map((a) => `
       <tr>
         <td class="name-cell">${esc(a.name)}</td>
         <td class="num">${money(a.costBefore)}</td>
         <td class="num">${money(a.costAfter)}</td>
-        <td class="num" style="color:${a.costDelta > 0 ? 'var(--bad)' : 'var(--good)'}">${a.costDelta > 0 ? '+' : ''}${money(a.costDelta)}</td>
+        <td class="num" style="color:${a.costDelta > 0 ? 'var(--bad)' : 'var(--good)'}">${
+          a.costDelta > 0 ? '+' : ''}${money(a.costDelta)}</td>
         <td class="num">${pct(a.gpBefore)}</td>
         <td class="num">${pct(a.gpAfter)}</td>
         <td class="num">${a.brokeTarget ? '<span class="pill bad">breaks target</span>' : ''}</td>
@@ -792,10 +1084,22 @@
 
     view.innerHTML = `
       <div class="view-head">
-        <div><h2>Price impact</h2><p>Put a supplier increase through the whole menu before it lands on your invoice.</p></div>
-        <button class="btn" data-act="clear-impact">Clear</button>
+        <div><h2>Suppliers</h2><p>Who you buy from, and what their price movements do to the menu.</p></div>
+        <button class="btn" data-act="add-supplier">Add supplier</button>
       </div>
 
+      <div class="section-title">Supplier list</div>
+      <p class="field-hint" style="margin:-4px 0 10px">
+        Email addresses are used to send price-adjustment claims from the Invoices tab.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Supplier</th><th>Accounts email</th><th class="num">Products</th><th class="num"></th></tr></thead>
+          <tbody>${supplierRows || '<tr><td colspan="4" class="empty" style="padding:28px">No suppliers yet.</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div class="section-title">Model a price movement</div>
       ${changed.length ? `
         <div class="stat-grid">
           <div class="stat"><div class="stat-label">Weighted GP before</div><div class="stat-value">${pct(result.gpBefore)}</div></div>
@@ -808,7 +1112,8 @@
           <div class="stat"><div class="stat-label">Dishes broken</div>
             <div class="stat-value ${result.brokeCount ? 'bad' : 'good'}">${result.brokeCount}</div>
             <div class="stat-note">fall below target GP</div></div>
-        </div>` : `<div class="banner warn">Enter a percentage against any ingredient below — for example 12 for a 12% rise, or -5 for a drop.</div>`}
+        </div>` : `<div class="banner warn">Enter a percentage against any item below — 12 for a 12% rise, -5 for a drop.
+          It applies to whichever supplier you currently buy that item from.</div>`}
 
       <div style="display:grid;gap:20px;grid-template-columns:minmax(260px,1fr) minmax(320px,1.6fr)" class="impact-layout">
         <div>
@@ -824,6 +1129,7 @@
               <tbody>${rows || '<tr><td colspan="7" class="empty" style="padding:30px">Nothing affected yet.</td></tr>'}</tbody>
             </table>
           </div>
+          ${changed.length ? '<div class="row" style="margin-top:10px"><button class="btn" data-act="clear-impact">Clear</button></div>' : ''}
         </div>
       </div>`;
 
@@ -833,9 +1139,169 @@
         const val = el.value.trim();
         if (val === '' || Number(val) === 0) delete impactChanges[id];
         else impactChanges[id] = Number(val);
-        renderImpact();
+        renderSuppliers();
       });
     });
+
+    $$('[data-supplier]').forEach((el) => {
+      el.addEventListener('change', () => {
+        Store.upsertSupplier({ id: el.dataset.supplier, email: el.value.trim() });
+        toast('Supplier saved.');
+      });
+    });
+  }
+
+  // ================= INVOICES =================
+
+  let invoiceText = '';
+  let invoiceSupplier = '';
+  let invoiceRef = '';
+  let invoiceResult = null;
+
+  function renderInvoices() {
+    const suppliers = Store.suppliers().slice().sort((a, b) => a.name.localeCompare(b.name));
+
+    view.innerHTML = `
+      <div class="view-head">
+        <div><h2>Invoices</h2>
+          <p>Check what a supplier billed against what you agreed, and claim the difference.</p></div>
+      </div>
+
+      <div class="banner warn">
+        Paste the invoice below, or drop in the CSV your supplier emails. Reading mailboxes
+        automatically needs a mail server — see the README for what that would take.
+      </div>
+
+      <div class="field-row" style="max-width:720px">
+        <div class="field"><label for="inv-supplier">Supplier</label>
+          <select id="inv-supplier">
+            <option value="">Any supplier</option>
+            ${suppliers.map((s) => `<option value="${esc(s.name)}"${
+              s.name === invoiceSupplier ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+          <span class="field-hint">Scopes matching to that supplier's product codes.</span></div>
+        <div class="field"><label for="inv-ref">Invoice number</label>
+          <input id="inv-ref" value="${esc(invoiceRef)}" placeholder="e.g. INV-12345"></div>
+      </div>
+
+      <div class="field">
+        <label for="inv-text">Invoice lines</label>
+        <textarea id="inv-text" rows="8" placeholder="Product Code,Description,Qty,Unit Price&#10;GT-SCH-300,Crumbed chicken schnitzel,4,99.50"
+          style="font-family:var(--mono);font-size:13px">${esc(invoiceText)}</textarea>
+        <span class="field-hint">CSV or tab-separated. A header row helps but is not required.</span>
+      </div>
+      <div class="row">
+        <button class="btn primary" data-act="reconcile">Check against agreed prices</button>
+        <button class="btn" data-act="load-invoice">Load a file…</button>
+        <input type="file" id="invoice-file" accept=".csv,.txt,text/csv,text/plain" hidden>
+        ${invoiceResult ? '<button class="btn" data-act="clear-invoice">Clear</button>' : ''}
+      </div>
+
+      <div id="inv-result">${invoiceResult ? invoiceResultHtml(invoiceResult) : ''}</div>`;
+
+    $('#inv-text').addEventListener('input', (e) => { invoiceText = e.target.value; });
+    $('#inv-ref').addEventListener('input', (e) => { invoiceRef = e.target.value; });
+    $('#inv-supplier').addEventListener('change', (e) => { invoiceSupplier = e.target.value; });
+  }
+
+  function invoiceResultHtml(r) {
+    const statusPill = (l) => ({
+      overcharged: '<span class="pill bad">over</span>',
+      undercharged: '<span class="pill warn">under</span>',
+      ok: '<span class="pill good">ok</span>',
+    }[l.status]);
+
+    const rows = r.lines.map((l) => `
+      <tr>
+        <td class="name-cell">${esc(l.ingredientName)}
+          <span class="sub-note">${esc(l.productCode || l.code || '')}${
+            l.matchedOn !== 'code' ? ` · matched on ${esc(l.matchedOn)}` : ''}</span></td>
+        <td class="num">${l.qty}</td>
+        <td class="num">${money(l.agreedPrice)}</td>
+        <td class="num">${money(l.invoicedPrice)}</td>
+        <td class="num" style="color:${l.variance > 0 ? 'var(--bad)' : l.variance < 0 ? 'var(--warn)' : 'inherit'}">
+          ${l.variance > 0 ? '+' : ''}${money(l.variance)}</td>
+        <td class="num">${l.varianceTotal > 0 ? '+' : ''}${money(l.varianceTotal)}</td>
+        <td class="num">${statusPill(l)}</td>
+      </tr>`).join('');
+
+    const problems = [];
+    if (r.unmatched.length) {
+      problems.push(`<div class="banner warn"><strong>${r.unmatched.length}</strong> line${
+        r.unmatched.length > 1 ? 's' : ''} could not be matched to anything in your library:
+        ${r.unmatched.slice(0, 6).map((l) => esc(l.description || l.code)).join(', ')}${
+        r.unmatched.length > 6 ? '…' : ''}. Add them as ingredients, or set the supplier's product code.</div>`);
+    }
+    if (r.noAgreedPrice.length) {
+      problems.push(`<div class="banner warn"><strong>${r.noAgreedPrice.length}</strong> line${
+        r.noAgreedPrice.length > 1 ? 's have' : ' has'} no agreed price on file, so nothing was checked:
+        ${r.noAgreedPrice.slice(0, 6).map((l) => esc(l.ingredient.name)).join(', ')}.</div>`);
+    }
+    if (r.skipped) {
+      problems.push(`<div class="banner warn">${r.skipped} row${
+        r.skipped > 1 ? 's were' : ' was'} skipped — no usable price could be read.</div>`);
+    }
+
+    return `
+      <div class="section-title">Result</div>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">To claim</div>
+          <div class="stat-value ${r.overchargedTotal > 0 ? 'bad' : 'good'}">${money(r.overchargedTotal)}</div>
+          <div class="stat-note">${r.overcharged.length} line${r.overcharged.length === 1 ? '' : 's'} over</div></div>
+        <div class="stat"><div class="stat-label">Lines checked</div>
+          <div class="stat-value">${r.lines.length}</div>
+          <div class="stat-note">${r.okCount} at the agreed price</div></div>
+        <div class="stat"><div class="stat-label">Net variance</div>
+          <div class="stat-value">${money(r.netVariance)}</div>
+          <div class="stat-note">after undercharges</div></div>
+        <div class="stat"><div class="stat-label">Not checked</div>
+          <div class="stat-value ${r.unmatched.length + r.noAgreedPrice.length ? 'warn' : ''}">${
+            r.unmatched.length + r.noAgreedPrice.length}</div>
+          <div class="stat-note">unmatched or no agreed price</div></div>
+      </div>
+
+      ${problems.join('')}
+
+      ${r.lines.length ? `<div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Agreed</th>
+            <th class="num">Invoiced</th><th class="num">Per unit</th><th class="num">Line</th><th class="num"></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : '<div class="empty card">Nothing matched — check the supplier filter and the product codes.</div>'}
+
+      ${r.overcharged.length ? `
+        <div class="section-title">Price adjustment claim</div>
+        <div class="card">
+          <div class="field"><label for="claim-subject">Subject</label>
+            <input id="claim-subject" readonly value="${esc(claimEmail(r).subject)}"></div>
+          <div class="field"><label for="claim-body">Message</label>
+            <textarea id="claim-body" rows="12" style="font-family:var(--mono);font-size:12.5px">${esc(claimEmail(r).body)}</textarea></div>
+          <div class="row">
+            <button class="btn primary" data-act="email-claim">Open in email</button>
+            <button class="btn" data-act="copy-claim">Copy message</button>
+          </div>
+          <p class="field-hint" style="margin-top:8px">
+            Edit the message before sending — it is yours, not an automatic send.
+          </p>
+        </div>` : ''}`;
+  }
+
+  function claimEmail(r) {
+    return Suppliers.adjustmentEmail(r, {
+      invoiceRef,
+      business: Store.settings().business || '',
+    });
+  }
+
+  function runReconcile() {
+    const text = $('#inv-text').value;
+    if (!text.trim()) { toast('Paste the invoice lines first.'); return; }
+    invoiceText = text;
+    invoiceResult = Suppliers.reconcileInvoice(text, Store.ctx(), { supplier: invoiceSupplier });
+    $('#inv-result').innerHTML = invoiceResultHtml(invoiceResult);
+    const n = invoiceResult.overcharged.length;
+    toast(n ? `${n} line${n > 1 ? 's' : ''} over the agreed price.` : 'Everything matches the agreed prices.');
   }
 
   // ================= DATA =================
@@ -853,6 +1319,8 @@
             <input id="s-tax" type="number" step="any" min="0" value="${esc(s.taxRate)}"></div>
           <div class="field"><label for="s-target">Target GP %</label>
             <input id="s-target" type="number" step="any" min="0" max="99" value="${esc(s.targetGpPct)}"></div>
+          <div class="field"><label for="s-business">Business name</label>
+            <input id="s-business" value="${esc(s.business || '')}" placeholder="signs price-adjustment claims"></div>
         </div>
         <button class="btn primary" data-act="save-settings">Save defaults</button>
       </div>
@@ -861,6 +1329,7 @@
       <div class="card">
         <p class="field-hint" style="margin:0 0 12px">
           ${Store.ingredients().length} ingredients · ${Store.recipes().length} recipes
+          · ${Store.suppliers().length} suppliers
         </p>
         <div class="row">
           <button class="btn" data-act="export">Export JSON</button>
@@ -914,7 +1383,8 @@
       dashboard: renderDashboard,
       recipes: renderRecipes,
       ingredients: renderIngredients,
-      impact: renderImpact,
+      suppliers: renderSuppliers,
+      invoices: renderInvoices,
       data: renderData,
     }[currentView] || renderDashboard)();
   }
@@ -972,7 +1442,61 @@
       return;
     }
 
-    if (act === 'clear-impact') { impactChanges = {}; return renderImpact(); }
+    if (act === 'clear-impact') { impactChanges = {}; return renderSuppliers(); }
+
+    if (act === 'add-supplier') {
+      const name = prompt('Supplier name');
+      if (!name || !name.trim()) return;
+      if (Store.supplierByName(name)) { toast('That supplier already exists.'); return; }
+      Store.upsertSupplier({ name: name.trim(), email: '' });
+      toast('Supplier added.');
+      return renderSuppliers();
+    }
+
+    if (act === 'del-supplier') {
+      const s = Store.suppliers().find((x) => x.id === el.dataset.id);
+      const used = Store.supplierUsage(s.name);
+      if (used.length) {
+        alert(`"${s.name}" still supplies ${used.length} item${used.length > 1 ? 's' : ''}: `
+          + `${used.slice(0, 8).join(', ')}${used.length > 8 ? '…' : ''}.\n\n`
+          + 'Point those at another supplier first.');
+        return;
+      }
+      if (confirm(`Remove ${s.name}?`)) {
+        Store.deleteSupplier(s.id);
+        toast('Supplier removed.');
+        renderSuppliers();
+      }
+      return;
+    }
+
+    if (act === 'reconcile') return runReconcile();
+    if (act === 'load-invoice') return $('#invoice-file').click();
+    if (act === 'clear-invoice') {
+      invoiceText = ''; invoiceResult = null;
+      return renderInvoices();
+    }
+
+    if (act === 'copy-claim') {
+      const body = $('#claim-body').value;
+      navigator.clipboard.writeText(body)
+        .then(() => toast('Message copied.'))
+        .catch(() => toast('Could not copy — select the text and copy manually.'));
+      return;
+    }
+
+    if (act === 'email-claim') {
+      const supplier = Store.supplierByName(invoiceSupplier)
+        || Store.supplierByName(invoiceResult && invoiceResult.overcharged[0]
+          && invoiceResult.overcharged[0].supplier);
+      const to = supplier && supplier.email ? supplier.email : '';
+      if (!to) toast('No email on file for that supplier — add one under Suppliers.');
+      const url = `mailto:${encodeURIComponent(to)}`
+        + `?subject=${encodeURIComponent($('#claim-subject').value)}`
+        + `&body=${encodeURIComponent($('#claim-body').value)}`;
+      window.location.href = url;
+      return;
+    }
     if (act === 'export') return doExport();
     if (act === 'import') return $('#import-file').click();
 
@@ -980,6 +1504,7 @@
       Store.updateSettings({
         taxRate: Number($('#s-tax').value),
         targetGpPct: Number($('#s-target').value),
+        business: $('#s-business').value.trim(),
       });
       toast('Defaults saved.');
       return;
@@ -1012,9 +1537,18 @@
 
   document.addEventListener('change', (e) => {
     if (e.target.id === 'import-file' && e.target.files[0]) doImport(e.target.files[0]);
+    if (e.target.id === 'invoice-file' && e.target.files[0]) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        invoiceText = String(reader.result);
+        $('#inv-text').value = invoiceText;
+        runReconcile();
+      };
+      reader.readAsText(e.target.files[0]);
+    }
   });
 
   const hash = location.hash.replace('#', '');
-  if (['dashboard', 'recipes', 'ingredients', 'impact', 'data'].includes(hash)) currentView = hash;
+  if (['dashboard', 'recipes', 'ingredients', 'suppliers', 'invoices', 'data'].includes(hash)) currentView = hash;
   render();
 })();

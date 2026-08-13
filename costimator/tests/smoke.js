@@ -166,32 +166,112 @@ const shot = async (page, name) => {
   await page.waitForTimeout(150);
   await shot(page, '03-ingredients.png');
 
-  await page.click('tr[data-ingredient="ing-wholebird"]');
-  await page.waitForSelector('#i-preview');
-  const preview = await page.locator('#i-preview .v').allTextContents();
-  check('ingredient preview shows raw and yielded cost', preview.length === 3, preview.join(' | '));
-  const raw = parseFloat(preview[0].replace('$', ''));
-  const yielded = parseFloat(preview[1].replace('$', ''));
-  check('yielded cost exceeds raw cost at 68% yield', yielded > raw, `${raw} vs ${yielded}`);
+  // ---- ingredient editor: competing supplier offers ----
+  await page.click('tr[data-ingredient="ing-gt-schnitzel"]');
+  await page.waitForSelector('#ing-editor');
+  check('both supplier prices are shown', (await page.locator('.offer').count()) === 2,
+    `${await page.locator('.offer').count()} offers`);
+  check('the offer being bought is marked', (await page.locator('.offer.active').count()) === 1);
 
+  const cmpRows = await page.locator('#ing-editor table tbody tr').count();
+  check('the comparison lists both suppliers', cmpRows === 2, `${cmpRows} rows`);
+
+  const bestTags = await page.locator('#ing-editor tbody .pill.good').count();
+  check('a best-price flag is shown on each measure', bestTags === 2, `${bestTags} flags`);
+
+  const warn = await page.locator('#ing-editor .banner.warn').first().textContent();
+  check('differing piece sizes are called out',
+    warn.includes('cheaper per piece') && warn.includes('cheaper per kilo'), warn.trim().slice(0, 90));
+
+  // ---- what a switch is worth, weighted by sales ----
+  await page.click('[data-act="switch-preview"]');
+  await page.waitForSelector('#switch-preview .stat-value');
+  const switchStats = await page.locator('#switch-preview .stat-value').allTextContents();
+  check('the switch shows a saving across volumes', switchStats[0].includes('$'), switchStats.join(' | '));
+  check('the new piece size is shown', switchStats[2].includes('250'), switchStats[2]);
+
+  const verdict = await page.locator('#switch-preview .mvb-verdict').textContent();
+  check('a saving that shrinks the piece is not sold as a free win',
+    verdict.includes('visible cut'), verdict.trim().slice(0, 120));
+
+  check('each dish is placed on the menu by volume',
+    (await page.locator('#switch-preview tbody .sub-note').first().textContent()).includes('by volume'));
+  check('the dish carrying the change is tagged',
+    (await page.locator('#switch-preview .tag.seller').count()) >= 1);
+  const exposure = await page.locator('#switch-preview .banner').first().textContent();
+  check('concentration of the saving is called out',
+    exposure.includes('of the change lands on'), exposure.trim().slice(0, 100));
+  check('and it names the trade-off being made',
+    exposure.includes('piece on that dish to save'), exposure.trim().slice(0, 160));
+  await shot(page, '06-supplier-switch.png');
+
+  // Yield still drives the rate.
+  const rateBefore = await page.locator('.offer .offer-rates b').first().textContent();
   await page.fill('#i-yield', '50');
-  await page.waitForTimeout(150);
-  const yielded50 = parseFloat((await page.locator('#i-preview .v').nth(1).textContent()).replace('$', ''));
-  check('dropping yield raises the yielded cost', yielded50 > yielded, `${yielded} -> ${yielded50}`);
+  await page.waitForTimeout(200);
+  const rateAfter = await page.locator('.offer .offer-rates b').first().textContent();
+  check('dropping the yield raises the offer rate',
+    parseFloat(rateAfter.replace('$', '')) > parseFloat(rateBefore.replace('$', '')),
+    `${rateBefore} -> ${rateAfter}`);
   await page.click('.modal-head [data-close]');
+  await page.waitForTimeout(150);
 
-  // ---- price impact ----
-  await page.click('.tab[data-view="impact"]');
+  // ---- price impact (now under Suppliers) ----
+  await page.click('.tab[data-view="suppliers"]');
   await page.waitForSelector('[data-change]');
   await page.fill('#ch-ing-breast', '15');
   await page.press('#ch-ing-breast', 'Tab');
   await page.waitForTimeout(250);
-  check('price rise reports affected dishes', (await page.locator('tbody tr').count()) >= 2);
+  check('the supplier list is shown', (await page.locator('tbody tr').count()) >= 4);
+  check('price rise reports affected dishes',
+    (await page.locator('.impact-layout tbody tr').count()) >= 2,
+    `${await page.locator('.impact-layout tbody tr').count()} rows`);
   const gpStats = await page.locator('.stat-value').allTextContents();
   check('impact shows before/after GP', gpStats.length === 4, gpStats.join(' | '));
   check('GP after is lower than before', parseFloat(gpStats[1]) < parseFloat(gpStats[0]),
     `${gpStats[0]} -> ${gpStats[1]}`);
   await shot(page, '04-price-impact.png');
+
+  // ---- invoice reconciliation ----
+  await page.click('.tab[data-view="invoices"]');
+  await page.waitForSelector('#inv-text');
+  await page.selectOption('#inv-supplier', 'G&T Chickens');
+  await page.fill('#inv-ref', 'INV-12345');
+  await page.fill('#inv-text',
+    'Product Code,Description,Qty,Unit Price\nGT-SCH-300,Crumbed chicken schnitzel,4,99.50\nGT-TEN-5K,Crumbed chicken tenders,2,41.00');
+  await page.click('[data-act="reconcile"]');
+  await page.waitForSelector('#inv-result .stat-value');
+
+  const invStats = await page.locator('#inv-result .stat-value').allTextContents();
+  check('the overcharge is totalled', invStats[0] === '$14.00', invStats.join(' | '));
+  check('both lines were checked', invStats[1] === '2', invStats.join(' | '));
+
+  const statuses = await page.locator('#inv-result tbody .pill').allTextContents();
+  check('one line is over and one is ok',
+    statuses.includes('over') && statuses.includes('ok'), statuses.join(', '));
+
+  const subject = await page.inputValue('#claim-subject');
+  check('the claim names the invoice and amount',
+    subject.includes('INV-12345') && subject.includes('14.00'), subject);
+  const claimBody = await page.inputValue('#claim-body');
+  check('the claim itemises the line', claimBody.includes('GT-SCH-300'));
+  check('the claim states both prices',
+    claimBody.includes('96.00') && claimBody.includes('99.50'));
+  await shot(page, '07-invoice.png');
+
+  // A clean invoice must raise nothing.
+  await page.fill('#inv-text', 'Product Code,Qty,Unit Price\nGT-SCH-300,4,96.00');
+  await page.click('[data-act="reconcile"]');
+  await page.waitForTimeout(300);
+  check('an invoice at the agreed price raises no claim',
+    (await page.locator('#claim-subject').count()) === 0);
+
+  // An unknown code must be reported, not silently dropped.
+  await page.fill('#inv-text', 'Product Code,Qty,Unit Price\nZZ-NOPE,1,10.00');
+  await page.click('[data-act="reconcile"]');
+  await page.waitForTimeout(300);
+  check('an unrecognised line is reported',
+    (await page.locator('#inv-result .banner.warn').first().textContent()).includes('could not be matched'));
 
   // ---- persistence ----
   await page.click('.tab[data-view="recipes"]');

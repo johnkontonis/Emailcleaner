@@ -19,7 +19,21 @@ const Store = (() => {
       // Finished products — bought in ready to cook, no build required. These
       // are ordinary ingredients as far as costing goes; the flag just lets the
       // app group them and offer them as a bought-in source for a dish.
-      { id: 'ing-gt-schnitzel', name: 'Crumbed chicken schnitzel 180g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-SCH-180', packSize: 24, packUnit: 'ea', packPrice: 92.0, yieldPct: 100, isFinishedProduct: true },
+      // Two suppliers compete for this one, at different piece sizes — the
+      // comparison this is here to demonstrate.
+      {
+        id: 'ing-gt-schnitzel', name: 'Crumbed chicken schnitzel',
+        category: 'Finished products', yieldPct: 100, isFinishedProduct: true,
+        preferredOfferId: 'off-gt-sch',
+        offers: [
+          { id: 'off-gt-sch', supplier: 'G&T Chickens', productCode: 'GT-SCH-300',
+            packSize: 24, packUnit: 'ea', packPrice: 96.0, agreedPrice: 96.0,
+            unitSize: 300, unitSizeUnit: 'g' },
+          { id: 'off-sp-sch', supplier: 'Southern Poultry', productCode: 'SP-CS-250',
+            packSize: 30, packUnit: 'ea', packPrice: 105.0, agreedPrice: 105.0,
+            unitSize: 250, unitSizeUnit: 'g' },
+        ],
+      },
       { id: 'ing-gt-tenders', name: 'Crumbed chicken tenders', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-TEN-5K', packSize: 5, packUnit: 'kg', packPrice: 41.0, yieldPct: 100, isFinishedProduct: true },
       { id: 'ing-gt-kiev', name: 'Garlic chicken kiev 200g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-KIE-200', packSize: 20, packUnit: 'ea', packPrice: 88.0, yieldPct: 100, isFinishedProduct: true },
 
@@ -133,6 +147,32 @@ const Store = (() => {
         ],
       },
       {
+        // Uses the bought-in schnitzel straight, which is what makes the
+        // supplier comparison on that item worth running.
+        id: 'rec-schnitzelroll', name: 'Schnitzel roll', type: 'menu', onMenu: true,
+        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
+        sellPrice: 18.5, taxRate: 10, targetGpPct: 70, unitsSold: 260,
+        method: 'Fry from frozen, build on a toasted bun with slaw and aioli.',
+        lines: [
+          { kind: 'ingredient', refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' },
+          { kind: 'ingredient', refId: 'ing-bun', qty: 1, unit: 'ea' },
+          { kind: 'ingredient', refId: 'ing-mayo', qty: 25, unit: 'ml' },
+          { kind: 'ingredient', refId: 'ing-potato', qty: 150, unit: 'g' },
+        ],
+      },
+      {
+        // Same product, a fraction of the volume — the contrast that makes
+        // "where does the saving actually land?" answerable.
+        id: 'rec-kids-schnitty', name: 'Kids schnitzel', type: 'menu', onMenu: true,
+        batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
+        sellPrice: 12.0, taxRate: 10, targetGpPct: 70, unitsSold: 45,
+        method: 'Fry from frozen, halve, serve with chips.',
+        lines: [
+          { kind: 'ingredient', refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' },
+          { kind: 'ingredient', refId: 'ing-potato', qty: 120, unit: 'g' },
+        ],
+      },
+      {
         // Nothing is made here — the dish is the supplier's product plus chips.
         id: 'rec-tenders', name: 'Chicken tenders & chips', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
@@ -157,11 +197,84 @@ const Store = (() => {
       },
     ];
 
-    return { ingredients, recipes, settings: { taxRate: 10, targetGpPct: 70, currency: '$' } };
+    const suppliers = [
+      { id: 'sup-gt', name: 'G&T Chickens', email: 'accounts@gtchickens.com' },
+      { id: 'sup-sp', name: 'Southern Poultry', email: '' },
+      { id: 'sup-bid', name: 'Bidfood', email: '' },
+      { id: 'sup-mkt', name: 'Market', email: '' },
+    ];
+
+    return { ingredients, recipes, suppliers, settings: defaultSettings() };
+  }
+
+  function defaultSettings() {
+    return { taxRate: 10, targetGpPct: 70, currency: '$', business: '', priceTolerance: 0.005 };
   }
 
   function emptyState() {
-    return { ingredients: [], recipes: [], settings: { taxRate: 10, targetGpPct: 70, currency: '$' } };
+    return { ingredients: [], recipes: [], suppliers: [], settings: defaultSettings() };
+  }
+
+  /**
+   * Bring stored data up to the current shape.
+   *
+   * Pack size and price used to live on the ingredient itself. They now live on
+   * a supplier offer, so more than one supplier can compete for the same item.
+   * Anything still in the old shape is folded into a single offer here, so no
+   * price ever needs re-entering. Idempotent — safe to run on every load.
+   */
+  function migrate(state) {
+    let changed = false;
+
+    for (const ing of state.ingredients || []) {
+      if (!Array.isArray(ing.offers) || !ing.offers.length) {
+        const offer = {
+          id: uid('off'),
+          supplier: ing.supplier || '',
+          productCode: ing.productCode || '',
+          packSize: ing.packSize,
+          packUnit: ing.packUnit,
+          packPrice: ing.packPrice,
+          // Nothing was ever agreed for legacy items, so the price being paid
+          // becomes the agreed price. It is the only defensible starting point,
+          // and it means reconciliation raises nothing until you change it.
+          agreedPrice: ing.agreedPrice != null ? ing.agreedPrice : ing.packPrice,
+          unitSize: ing.unitSize,
+          unitSizeUnit: ing.unitSizeUnit,
+        };
+        ing.offers = [offer];
+        ing.preferredOfferId = offer.id;
+        // Remove the old fields so there is only ever one source of truth.
+        delete ing.packSize; delete ing.packUnit; delete ing.packPrice;
+        delete ing.supplier; delete ing.productCode; delete ing.agreedPrice;
+        delete ing.unitSize; delete ing.unitSizeUnit;
+        changed = true;
+      }
+      for (const o of ing.offers) {
+        if (!o.id) { o.id = uid('off'); changed = true; }
+      }
+      if (!ing.preferredOfferId || !ing.offers.some((o) => o.id === ing.preferredOfferId)) {
+        ing.preferredOfferId = ing.offers[0].id;
+        changed = true;
+      }
+    }
+
+    // Every supplier named on an offer should have a record to hang an email
+    // address off, so invoices can be answered.
+    if (!Array.isArray(state.suppliers)) { state.suppliers = []; changed = true; }
+    const known = new Set(state.suppliers.map((s) => s.name.toLowerCase()));
+    for (const ing of state.ingredients || []) {
+      for (const o of ing.offers || []) {
+        const name = (o.supplier || '').trim();
+        if (name && !known.has(name.toLowerCase())) {
+          state.suppliers.push({ id: uid('sup'), name, email: '' });
+          known.add(name.toLowerCase());
+          changed = true;
+        }
+      }
+    }
+
+    return changed;
   }
 
   let state = null;
@@ -175,9 +288,10 @@ const Store = (() => {
       console.warn('Could not read saved data, starting from the sample set.', err);
       state = seed();
     }
-    state.settings = state.settings || { taxRate: 10, targetGpPct: 70, currency: '$' };
+    state.settings = { ...defaultSettings(), ...(state.settings || {}) };
     state.ingredients = state.ingredients || [];
     state.recipes = state.recipes || [];
+    if (migrate(state)) save();
     return state;
   }
 
@@ -193,8 +307,79 @@ const Store = (() => {
 
   const ingredients = () => load().ingredients;
   const recipes = () => load().recipes;
+  const suppliers = () => load().suppliers;
   const settings = () => load().settings;
   const ctx = () => ({ ingredients: ingredients(), recipes: recipes() });
+
+  // ---- suppliers ----
+
+  function upsertSupplier(data) {
+    const list = suppliers();
+    if (data.id) {
+      const idx = list.findIndex((s) => s.id === data.id);
+      if (idx >= 0) { list[idx] = { ...list[idx], ...data }; save(); return list[idx]; }
+    }
+    const created = { id: uid('sup'), name: '', email: '', ...data };
+    list.push(created);
+    save();
+    return created;
+  }
+
+  function supplierByName(name) {
+    const n = String(name || '').trim().toLowerCase();
+    return suppliers().find((s) => s.name.toLowerCase() === n) || null;
+  }
+
+  /** Suppliers can't be deleted while offers still name them. */
+  function supplierUsage(name) {
+    const n = String(name || '').trim().toLowerCase();
+    return ingredients()
+      .filter((i) => (i.offers || []).some((o) => (o.supplier || '').toLowerCase() === n))
+      .map((i) => i.name);
+  }
+
+  function deleteSupplier(id) {
+    const list = suppliers();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx >= 0) { list.splice(idx, 1); save(); }
+  }
+
+  // ---- supplier offers on an ingredient ----
+
+  function addOffer(ingredientId, data = {}) {
+    const ing = getIngredient(ingredientId);
+    if (!ing) return null;
+    const from = Costing.activeOffer(ing);
+    // Seed a new offer from the current one so only what differs needs typing.
+    const offer = {
+      id: uid('off'),
+      supplier: '', productCode: '',
+      packSize: from.packSize, packUnit: from.packUnit, packPrice: from.packPrice,
+      agreedPrice: null, unitSize: from.unitSize, unitSizeUnit: from.unitSizeUnit,
+      ...data,
+    };
+    ing.offers = ing.offers || [];
+    ing.offers.push(offer);
+    save();
+    return offer;
+  }
+
+  function deleteOffer(ingredientId, offerId) {
+    const ing = getIngredient(ingredientId);
+    if (!ing || !ing.offers) return;
+    // Never leave an ingredient with no way of being priced.
+    if (ing.offers.length <= 1) throw new Error('An ingredient needs at least one supplier price.');
+    ing.offers = ing.offers.filter((o) => o.id !== offerId);
+    if (ing.preferredOfferId === offerId) ing.preferredOfferId = ing.offers[0].id;
+    save();
+  }
+
+  function setPreferredOffer(ingredientId, offerId) {
+    const ing = getIngredient(ingredientId);
+    if (!ing) return;
+    ing.preferredOfferId = offerId;
+    save();
+  }
 
   function getIngredient(id) { return ingredients().find((i) => i.id === id) || null; }
   function getRecipe(id) { return recipes().find((r) => r.id === id) || null; }
@@ -207,6 +392,9 @@ const Store = (() => {
     }
     const created = { id: uid('ing'), yieldPct: 100, ...data };
     list.push(created);
+    // A brand new ingredient arrives in the flat shape from the editor; fold it
+    // into an offer the same way stored data is folded.
+    migrate({ ingredients: [created], suppliers: load().suppliers });
     save();
     return created;
   }
@@ -281,8 +469,11 @@ const Store = (() => {
     state = {
       ingredients: parsed.ingredients,
       recipes: parsed.recipes,
-      settings: parsed.settings || { taxRate: 10, targetGpPct: 70, currency: '$' },
+      suppliers: parsed.suppliers || [],
+      settings: { ...defaultSettings(), ...(parsed.settings || {}) },
     };
+    // An export from an older version comes in the old shape.
+    migrate(state);
     save();
     return state;
   }
@@ -291,7 +482,9 @@ const Store = (() => {
   function clearAll() { state = emptyState(); save(); return state; }
 
   return {
-    uid, load, save, ingredients, recipes, settings, ctx,
+    uid, load, save, migrate, ingredients, recipes, suppliers, settings, ctx,
+    upsertSupplier, supplierByName, supplierUsage, deleteSupplier,
+    addOffer, deleteOffer, setPreferredOffer,
     getIngredient, getRecipe, upsertIngredient, upsertRecipe,
     ingredientUsage, recipeUsage, deleteIngredient, deleteRecipe, duplicateRecipe,
     updateSettings, exportJson, importJson, resetToSample, clearAll,
