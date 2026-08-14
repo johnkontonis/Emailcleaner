@@ -45,6 +45,7 @@
   }
 
   function closeModal() {
+    $('.modal-panel').classList.remove('wide');
     $('#modal').hidden = true;
     $('#modal-body').innerHTML = '';
     $('#modal-foot').innerHTML = '';
@@ -783,9 +784,14 @@
         <label for="i-name">Name</label>
         <input id="i-name" data-i="name" value="${esc(d.name)}" placeholder="e.g. Crumbed chicken schnitzel">
       </div>
+      <datalist id="location-names">${Store.locations().map((l) => `<option value="${esc(l)}">`).join('')}</datalist>
       <div class="field-row">
         <div class="field"><label for="i-category">Category</label>
           <input id="i-category" data-i="category" value="${esc(d.category || '')}"></div>
+        <div class="field"><label for="i-location">Storage location</label>
+          <input id="i-location" data-i="location" list="location-names"
+                 value="${esc(d.location || '')}" placeholder="e.g. Coolroom">
+          <span class="field-hint">Groups the stocktake count sheet.</span></div>
         <div class="field"><label for="i-yield">Yield %</label>
           <input id="i-yield" type="number" step="any" min="1" max="100" data-i="yieldPct"
                  value="${esc(d.yieldPct == null ? 100 : d.yieldPct)}">
@@ -975,7 +981,7 @@
         else if (f === 'density') ingDraft[f] = el.value ? Number(el.value) : undefined;
         else ingDraft[f] = el.value;
         // Names are typed a character at a time; re-rendering would eat the caret.
-        if (f === 'name' || f === 'category') return;
+        if (f === 'name' || f === 'category' || f === 'location') return;
         renderIngredientEditor();
       });
     });
@@ -1650,6 +1656,313 @@
     toast(n ? `${n} line${n > 1 ? 's' : ''} over the agreed price.` : 'Everything matches the agreed prices.');
   }
 
+  // ================= STOCKTAKE =================
+
+  let countDraft = null; // the stocktake being counted, edited in place
+
+  const fmtBase = (qty, baseUnit) => {
+    if (baseUnit === 'g') return `${(qty / 1000).toFixed(qty >= 100 ? 1 : 2)} kg`;
+    if (baseUnit === 'ml') return `${(qty / 1000).toFixed(qty >= 100 ? 1 : 2)} L`;
+    return `${Math.round(qty * 10) / 10} ea`;
+  };
+
+  function stocktakeCtx(st) {
+    return { ingredients: Store.ingredients(), recipes: Store.recipesWithSales(st.venueId) };
+  }
+
+  function stocktakeReport(st) {
+    // Closed stocktakes keep the report they were closed with, so later price
+    // changes don't rewrite history. Open ones are computed live.
+    return st.report || Stocktake.analyseStocktake(st, stocktakeCtx(st));
+  }
+
+  function renderStocktakeView() {
+    const list = Store.stocktakes().slice()
+      .sort((a, b) => (b.periodEnd || '').localeCompare(a.periodEnd || ''));
+
+    const rows = list.map((st) => {
+      const rep = stocktakeReport(st);
+      const counted = (st.lines || []).filter((l) => l.countedQty != null).length;
+      return `
+        <tr class="clickable" data-stocktake="${esc(st.id)}">
+          <td class="name-cell">${esc(st.periodStart || '')} → ${esc(st.periodEnd || '')}
+            <span class="sub-note">${counted} of ${(st.lines || []).length} lines counted</span></td>
+          <td>${esc(venueName(st.venueId))}</td>
+          <td><span class="pill ${st.status === 'closed' ? 'good' : 'warn'}">${esc(st.status)}</span></td>
+          <td class="num">${money(rep.closingValue)}</td>
+          <td class="num">${st.status === 'closed'
+            ? `<span class="pill ${rep.varianceValue > 0 ? 'bad' : 'good'}">${rep.varianceValue > 0 ? '+' : ''}${money(rep.varianceValue)}</span>`
+            : '—'}</td>
+          <td class="num">
+            ${st.status === 'open' ? `<button class="btn small primary" data-act="count-stocktake" data-id="${esc(st.id)}">Count</button>` : ''}
+            <button class="icon-btn" data-act="del-stocktake" data-id="${esc(st.id)}" title="Delete">✕</button></td>
+        </tr>`;
+    }).join('');
+
+    view.innerHTML = `
+      <div class="view-head">
+        <div><h2>Stocktake</h2>
+          <p>Count the shelf, then see what the menu can't explain — waste, over-portioning and shrinkage, valued per item.</p></div>
+        <button class="btn primary" data-act="new-stocktake">New stocktake</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Period</th><th>Venue</th><th>Status</th>
+            <th class="num">Closing stock</th><th class="num">Unexplained</th><th class="num"></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="empty" style="padding:34px">
+            No stocktakes yet. Opening balances carry over from the previous count, and purchases
+            prefill from received orders — the first one is the only slow one.</td></tr>`}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function openNewStocktakeDialog() {
+    const venues = Store.venues();
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 8)}01`;
+
+    openModal('New stocktake',
+      `<div class="field-row">
+        <div class="field"><label for="stk-venue">Venue</label>
+          <select id="stk-venue">${venues.map((v) =>
+            `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('')}</select>
+          <span class="field-hint">Stock is physical — one count per site.</span></div>
+        <div class="field"><label for="stk-start">Period start</label>
+          <input id="stk-start" type="date" value="${esc(monthStart)}"></div>
+        <div class="field"><label for="stk-end">Period end (count date)</label>
+          <input id="stk-end" type="date" value="${esc(today)}"></div>
+      </div>
+      <p class="field-hint">
+        Opening balances come from this venue's last closed stocktake; purchases come from
+        received orders dated inside the period. Both stay editable on the sheet.
+      </p>`,
+      `<button class="btn" data-close>Cancel</button>
+       <button class="btn primary" data-act="create-stocktake">Start counting</button>`,
+      () => {
+        // Default the start to the day after the venue's last close.
+        const wire = () => {
+          const prev = Store.stocktakes()
+            .filter((s) => s.venueId === $('#stk-venue').value && s.status === 'closed')
+            .sort((a, b) => (b.periodEnd || '').localeCompare(a.periodEnd || ''))[0];
+          if (prev && prev.periodEnd) {
+            const d = new Date(prev.periodEnd + 'T00:00:00Z');
+            d.setUTCDate(d.getUTCDate() + 1);
+            $('#stk-start').value = d.toISOString().slice(0, 10);
+          }
+        };
+        $('#stk-venue').addEventListener('change', wire);
+        wire();
+      });
+  }
+
+  function openCountSheet(id) {
+    countDraft = Store.getStocktake(id);
+    if (!countDraft) return;
+
+    openModal(
+      `Stocktake — ${venueName(countDraft.venueId)}, ${countDraft.periodStart} → ${countDraft.periodEnd}`,
+      '<div id="count-sheet"></div>',
+      `<span class="field-hint" id="count-progress"></span>
+       <div class="spacer"></div>
+       <button class="btn" data-act="save-count">Save & finish later</button>
+       <button class="btn primary" data-act="close-stocktake">Close stocktake</button>`,
+      () => renderCountSheet()
+    );
+    $('.modal-panel').classList.add('wide');
+  }
+
+  function renderCountSheet() {
+    const st = countDraft;
+    const ings = new Map(Store.ingredients().map((i) => [i.id, i]));
+
+    // Group by storage location — the sheet should read in the order you walk.
+    const groups = new Map();
+    st.lines.forEach((l, idx) => {
+      const ing = ings.get(l.ingredientId);
+      if (!ing) return;
+      const loc = (ing.location || 'Unassigned').trim() || 'Unassigned';
+      if (!groups.has(loc)) groups.set(loc, []);
+      groups.get(loc).push({ line: l, idx, ing });
+    });
+
+    const sections = [...groups.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([loc, rows]) => `
+        <div class="section-title">${esc(loc)}</div>
+        <div class="count-row count-head">
+          <span>Item</span><span style="text-align:right">Opening</span>
+          <span style="text-align:right">Purchased</span><span style="text-align:right">Counted</span>
+          <span style="text-align:right">Value</span>
+        </div>
+        ${rows.map(({ line, idx, ing }) => {
+          const offer = Costing.activeOffer(ing);
+          const value = (Number(line.countedQty) || 0) * Number(offer.packPrice);
+          return `
+            <div class="count-row">
+              <span class="item">${esc(ing.name)}
+                <span class="sub-note">packs of ${esc(offer.packSize)} ${esc(Units.unitLabel(offer.packUnit))} · ${money(offer.packPrice)}</span></span>
+              <input type="number" step="any" min="0" data-count="${idx}" data-f="openQty" value="${esc(line.openQty ?? 0)}">
+              <input type="number" step="any" min="0" data-count="${idx}" data-f="purchasedQty" value="${esc(line.purchasedQty ?? 0)}">
+              <input type="number" step="any" min="0" data-count="${idx}" data-f="countedQty"
+                     value="${line.countedQty == null ? '' : esc(line.countedQty)}" placeholder="—">
+              <span class="line-cost">${line.countedQty == null ? '—' : money(value)}</span>
+            </div>`;
+        }).join('')}`).join('');
+
+    $('#count-sheet').innerHTML = `
+      <p class="field-hint" style="margin:0 0 8px">
+        Count in <strong>packs</strong> — decimals are fine (0.4 of a box). Leave a line blank if
+        you didn't count it; closing treats blanks with movements as counted to zero, and warns first.
+      </p>
+      ${sections}`;
+
+    updateCountProgress();
+
+    $$('[data-count]', $('#count-sheet')).forEach((el) => {
+      el.addEventListener('change', () => {
+        const line = countDraft.lines[Number(el.dataset.count)];
+        line[el.dataset.f] = el.value === '' ? (el.dataset.f === 'countedQty' ? null : 0) : Number(el.value);
+        // Update just this row's value + the progress line; a full re-render
+        // would steal focus mid-count.
+        const row = el.closest('.count-row');
+        const ing = Store.getIngredient(line.ingredientId);
+        const offer = Costing.activeOffer(ing);
+        row.querySelector('.line-cost').textContent =
+          line.countedQty == null ? '—' : money((Number(line.countedQty) || 0) * Number(offer.packPrice));
+        updateCountProgress();
+      });
+    });
+  }
+
+  function updateCountProgress() {
+    const el = $('#count-progress');
+    if (!el || !countDraft) return;
+    const counted = countDraft.lines.filter((l) => l.countedQty != null).length;
+    const value = countDraft.lines.reduce((sum, l) => {
+      const ing = Store.getIngredient(l.ingredientId);
+      if (!ing || l.countedQty == null) return sum;
+      try { return sum + Number(l.countedQty) * Number(Costing.activeOffer(ing).packPrice); }
+      catch (err) { return sum; }
+    }, 0);
+    el.textContent = `${counted} of ${countDraft.lines.length} counted · ${money(value)} on the shelf so far`;
+  }
+
+  function closeStocktake() {
+    const st = countDraft;
+    const rep = Stocktake.analyseStocktake(st, stocktakeCtx(st));
+    if (rep.uncountedLines > 0) {
+      const goOn = confirm(
+        `${rep.uncountedLines} line${rep.uncountedLines > 1 ? 's have' : ' has'} stock movements but no count — `
+        + 'closing treats them as counted to zero, which books ALL of that stock as used.\n\nClose anyway?');
+      if (!goOn) return;
+    }
+    Store.upsertStocktake({ id: st.id, lines: st.lines, status: 'closed', report: rep });
+    closeModal();
+    toast('Stocktake closed.');
+    openStocktakeReport(st.id);
+    render();
+  }
+
+  function openStocktakeReport(id) {
+    const st = Store.getStocktake(id);
+    if (!st) return;
+    const r = stocktakeReport(st);
+
+    const banners = [];
+    if (r.worst) {
+      banners.push(`<div class="banner ${r.varianceValue > 0 ? 'bad' : 'warn'}">
+        <strong>${money(Math.abs(r.varianceValue))}</strong> of stock movement the menu can't explain —
+        ${pct(Math.abs(r.variancePct))} of theoretical usage.
+        <strong>${esc(r.worst.name)}</strong> alone carries ${pct(r.worst.shareOfVariance, 0)} of it
+        (${r.worst.varianceValue > 0 ? '+' : ''}${money(r.worst.varianceValue)}).</div>`);
+    } else if (st.status === 'closed') {
+      banners.push('<div class="banner warn" style="background:rgba(53,192,138,0.09);border-color:rgba(53,192,138,0.35);color:var(--good)">Stock movements match the menu — nothing unexplained.</div>');
+    }
+    if (r.uncountedLines) {
+      banners.push(`<div class="banner warn">${r.uncountedLines} line${r.uncountedLines > 1 ? 's' : ''} had
+        movements but no count and were treated as counted to zero — their variance may be a counting gap, not waste.</div>`);
+    }
+    if (r.countErrors) {
+      banners.push(`<div class="banner bad">${r.countErrors} line${r.countErrors > 1 ? 's show' : ' shows'} more
+        closing stock than opening + purchases can supply — recheck the count or a missed delivery.</div>`);
+    }
+    if (r.notCounted.length) {
+      banners.push(`<div class="banner warn">The menu used ${r.notCounted.length} item${r.notCounted.length > 1 ? 's' : ''}
+        this count never looked at (${money(r.notCounted.reduce((s, n) => s + n.theoValue, 0))} theoretical):
+        ${r.notCounted.slice(0, 6).map((n) => esc(n.name)).join(', ')}${r.notCounted.length > 6 ? '…' : ''}.</div>`);
+    }
+    if (r.broken.length) {
+      banners.push(`<div class="banner bad">${r.broken.length} line${r.broken.length > 1 ? 's' : ''} could not be
+        valued: ${r.broken.map((b) => `${esc(b.name)} — ${esc(b.error)}`).join('; ')}</div>`);
+    }
+
+    const rows = r.lines.map((l) => {
+      const pill = l.countError
+        ? '<span class="pill bad">count error</span>'
+        : l.uncounted
+          ? '<span class="pill warn">no count</span>'
+          : Math.abs(l.varianceValue) < 0.5
+            ? '<span class="pill good">ok</span>'
+            : l.varianceValue > 0
+              ? '<span class="pill bad">waste</span>'
+              : '<span class="pill warn">gain</span>';
+      return `
+        <tr>
+          <td class="name-cell">${esc(l.name)}<span class="sub-note">${esc(l.location)}</span></td>
+          <td class="num">${fmtBase(l.actualBase, l.baseUnit)}</td>
+          <td class="num">${fmtBase(l.theoBase, l.baseUnit)}</td>
+          <td class="num">${l.varianceBase > 0 ? '+' : ''}${fmtBase(l.varianceBase, l.baseUnit)}</td>
+          <td class="num" style="color:${l.varianceValue > 0.5 ? 'var(--bad)' : l.varianceValue < -0.5 ? 'var(--warn)' : 'inherit'}">
+            ${l.varianceValue > 0 ? '+' : ''}${money(l.varianceValue)}</td>
+          <td class="num">${l.variancePct == null ? '—' : `${l.variancePct > 0 ? '+' : ''}${l.variancePct}%`}</td>
+          <td class="num">${pill}</td>
+        </tr>`;
+    }).join('');
+
+    openModal(
+      `Stocktake report — ${venueName(st.venueId)}, ${st.periodStart} → ${st.periodEnd}`,
+      `<div class="stat-grid">
+        <div class="stat"><div class="stat-label">Unexplained</div>
+          <div class="stat-value ${r.varianceValue > 0 ? 'bad' : 'good'}">${r.varianceValue > 0 ? '+' : ''}${money(r.varianceValue)}</div>
+          <div class="stat-note">${pct(Math.abs(r.variancePct))} of theoretical usage</div></div>
+        <div class="stat"><div class="stat-label">Actual COGS</div>
+          <div class="stat-value">${money(r.actualCogs)}</div>
+          <div class="stat-note">open + purchases − close</div></div>
+        <div class="stat"><div class="stat-label">Theoretical COGS</div>
+          <div class="stat-value">${money(r.theoCogs)}</div>
+          <div class="stat-note">recipes × sales</div></div>
+        <div class="stat"><div class="stat-label">Closing stock</div>
+          <div class="stat-value">${money(r.closingValue)}</div>
+          <div class="stat-note">on the shelf, at cost</div></div>
+      </div>
+
+      <p class="mvb-verdict" style="margin:0 0 12px">
+        The menu says <strong>${pct(r.theoFoodCostPct)}</strong> food cost; the stockroom says
+        <strong>${pct(r.actualFoodCostPct)}</strong>. The gap is the unexplained
+        ${money(Math.abs(r.varianceValue))} above.
+      </p>
+
+      ${banners.join('')}
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Item</th><th class="num">Used</th><th class="num">Should have</th>
+            <th class="num">Δ qty</th><th class="num">Δ $</th><th class="num">Δ %</th><th class="num"></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="field-hint" style="margin-top:10px">
+        "Used" is opening + purchases − closing. "Should have" is what the recipes account for at this
+        venue's sales, including declared yields and batch wastage — so the variance is only the loss
+        nobody has planned for. Valued at current pack prices${st.report ? ', frozen when the stocktake was closed' : ''}.
+      </p>`,
+      `<button class="btn" data-close>Close</button>
+       ${st.status === 'open' ? `<button class="btn primary" data-act="count-stocktake" data-id="${esc(st.id)}">Back to counting</button>` : ''}`,
+      () => {}
+    );
+    $('.modal-panel').classList.add('wide');
+  }
+
   // ================= DATA =================
 
   function renderData() {
@@ -1796,6 +2109,7 @@
       suppliers: renderSuppliers,
       orders: renderOrders,
       invoices: renderInvoices,
+      stocktake: renderStocktakeView,
       data: renderData,
     }[currentView] || renderDashboard)();
   }
@@ -1990,6 +2304,45 @@
       return;
     }
 
+    if (act === 'new-stocktake') return openNewStocktakeDialog();
+
+    if (act === 'create-stocktake') {
+      const venueId = $('#stk-venue').value;
+      const start = $('#stk-start').value;
+      const end = $('#stk-end').value;
+      if (!start || !end || end < start) { toast('Check the period dates.'); return; }
+      const st = Store.createStocktake(venueId, start, end);
+      closeModal();
+      openCountSheet(st.id);
+      return;
+    }
+
+    if (act === 'count-stocktake') {
+      e.stopPropagation();
+      closeModal();
+      return openCountSheet(el.dataset.id);
+    }
+
+    if (act === 'save-count') {
+      Store.upsertStocktake({ id: countDraft.id, lines: countDraft.lines });
+      closeModal();
+      toast('Counts saved.');
+      return render();
+    }
+
+    if (act === 'close-stocktake') return closeStocktake();
+
+    if (act === 'del-stocktake') {
+      e.stopPropagation();
+      const st = Store.getStocktake(el.dataset.id);
+      if (confirm(`Delete the ${venueName(st.venueId)} stocktake for ${st.periodStart} → ${st.periodEnd}?`)) {
+        Store.deleteStocktake(st.id);
+        toast('Stocktake deleted.');
+        render();
+      }
+      return;
+    }
+
     if (act === 'reconcile') return runReconcile();
     if (act === 'load-invoice') return $('#invoice-file').click();
     if (act === 'clear-invoice') {
@@ -2051,6 +2404,11 @@
     }
 
     // Row clicks open the editor, but not when a row button was the target.
+    const stRow = e.target.closest('[data-stocktake]');
+    if (stRow && !e.target.closest('button')) {
+      const st = Store.getStocktake(stRow.dataset.stocktake);
+      return st.status === 'closed' ? openStocktakeReport(st.id) : openCountSheet(st.id);
+    }
     const orderRow = e.target.closest('[data-order]');
     if (orderRow && !e.target.closest('button')) return openOrderEditor(orderRow.dataset.order);
     const recipeRow = e.target.closest('[data-recipe]');
@@ -2089,6 +2447,6 @@
   });
 
   const hash = location.hash.replace('#', '');
-  if (['dashboard', 'recipes', 'ingredients', 'suppliers', 'orders', 'invoices', 'data'].includes(hash)) currentView = hash;
+  if (['dashboard', 'recipes', 'ingredients', 'suppliers', 'orders', 'invoices', 'stocktake', 'data'].includes(hash)) currentView = hash;
   render();
 })();

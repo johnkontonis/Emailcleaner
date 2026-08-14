@@ -175,6 +175,22 @@ input[type="search"] { max-width: 280px; }
   border-radius: 12px; width: min(760px, 100%); max-height: 88vh; display: flex; flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
+.modal-panel.wide { width: min(1020px, 100%); }
+
+/* stocktake count sheet */
+.count-row {
+  display: grid; grid-template-columns: 1fr 96px 96px 96px 92px; gap: 8px;
+  align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line);
+}
+.count-row:last-child { border-bottom: 0; }
+.count-head {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 620; border-bottom: 1px solid var(--line);
+}
+.count-row .item { font-size: 13.5px; font-weight: 560; }
+.count-row .item .sub-note { margin-top: 0; }
+.count-row .line-cost { font-family: var(--mono); font-size: 12.5px; color: var(--muted); text-align: right; }
+.count-row input { padding: 6px 8px; font-size: 13px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 15px 18px; border-bottom: 1px solid var(--line); }
 .modal-head h2 { font-size: 16.5px; }
 .modal-body { padding: 18px; overflow-y: auto; }

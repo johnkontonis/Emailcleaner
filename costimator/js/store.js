@@ -20,17 +20,17 @@ const Store = (() => {
   // than an empty shell. Prices are placeholders — replace with your invoices.
   function seed() {
     const ingredients = [
-      { id: 'ing-maryland', name: 'Chicken maryland', category: 'Poultry', supplier: 'G&T Chickens', packSize: 10, packUnit: 'kg', packPrice: 62.5, yieldPct: 100 },
-      { id: 'ing-breast', name: 'Chicken breast fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 57.5, yieldPct: 96 },
-      { id: 'ing-wholebird', name: 'Whole bird size 16', category: 'Poultry', supplier: 'G&T Chickens', packSize: 12, packUnit: 'kg', packPrice: 63.6, yieldPct: 68 },
-      { id: 'ing-thigh', name: 'Chicken thigh fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 48.0, yieldPct: 98 },
+      { id: 'ing-maryland', location: 'Coolroom', name: 'Chicken maryland', category: 'Poultry', supplier: 'G&T Chickens', packSize: 10, packUnit: 'kg', packPrice: 62.5, yieldPct: 100 },
+      { id: 'ing-breast', location: 'Coolroom', name: 'Chicken breast fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 57.5, yieldPct: 96 },
+      { id: 'ing-wholebird', location: 'Coolroom', name: 'Whole bird size 16', category: 'Poultry', supplier: 'G&T Chickens', packSize: 12, packUnit: 'kg', packPrice: 63.6, yieldPct: 68 },
+      { id: 'ing-thigh', location: 'Coolroom', name: 'Chicken thigh fillet', category: 'Poultry', supplier: 'G&T Chickens', packSize: 5, packUnit: 'kg', packPrice: 48.0, yieldPct: 98 },
       // Finished products — bought in ready to cook, no build required. These
       // are ordinary ingredients as far as costing goes; the flag just lets the
       // app group them and offer them as a bought-in source for a dish.
       // Two suppliers compete for this one, at different piece sizes — the
       // comparison this is here to demonstrate.
       {
-        id: 'ing-gt-schnitzel', name: 'Crumbed chicken schnitzel',
+        id: 'ing-gt-schnitzel', location: 'Freezer', name: 'Crumbed chicken schnitzel',
         category: 'Finished products', yieldPct: 100, isFinishedProduct: true,
         preferredOfferId: 'off-gt-sch',
         offers: [
@@ -42,26 +42,26 @@ const Store = (() => {
             unitSize: 250, unitSizeUnit: 'g' },
         ],
       },
-      { id: 'ing-gt-tenders', name: 'Crumbed chicken tenders', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-TEN-5K', packSize: 5, packUnit: 'kg', packPrice: 41.0, yieldPct: 100, isFinishedProduct: true },
-      { id: 'ing-gt-kiev', name: 'Garlic chicken kiev 200g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-KIE-200', packSize: 20, packUnit: 'ea', packPrice: 88.0, yieldPct: 100, isFinishedProduct: true },
+      { id: 'ing-gt-tenders', location: 'Freezer', name: 'Crumbed chicken tenders', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-TEN-5K', packSize: 5, packUnit: 'kg', packPrice: 41.0, yieldPct: 100, isFinishedProduct: true },
+      { id: 'ing-gt-kiev', location: 'Freezer', name: 'Garlic chicken kiev 200g', category: 'Finished products', supplier: 'G&T Chickens', productCode: 'GT-KIE-200', packSize: 20, packUnit: 'ea', packPrice: 88.0, yieldPct: 100, isFinishedProduct: true },
 
-      { id: 'ing-flour', name: 'Plain flour', category: 'Dry goods', supplier: 'Bidfood', packSize: 12.5, packUnit: 'kg', packPrice: 18.75, yieldPct: 100 },
-      { id: 'ing-crumb', name: 'Panko breadcrumb', category: 'Dry goods', supplier: 'Bidfood', packSize: 10, packUnit: 'kg', packPrice: 42.0, yieldPct: 100 },
-      { id: 'ing-egg', name: 'Eggs 55g', category: 'Dairy & eggs', supplier: 'Bidfood', packSize: 15, packUnit: 'doz', packPrice: 72.0, yieldPct: 100 },
-      { id: 'ing-oil', name: 'Vegetable oil', category: 'Oils', supplier: 'Bidfood', packSize: 20, packUnit: 'l', packPrice: 48.0, yieldPct: 100, density: 0.92 },
-      { id: 'ing-salt', name: 'Fine salt', category: 'Dry goods', supplier: 'Bidfood', packSize: 2, packUnit: 'kg', packPrice: 3.2, yieldPct: 100 },
-      { id: 'ing-pepper', name: 'Cracked pepper', category: 'Dry goods', supplier: 'Bidfood', packSize: 500, packUnit: 'g', packPrice: 14.5, yieldPct: 100 },
-      { id: 'ing-paprika', name: 'Smoked paprika', category: 'Dry goods', supplier: 'Bidfood', packSize: 500, packUnit: 'g', packPrice: 16.8, yieldPct: 100 },
-      { id: 'ing-napoli', name: 'Napoli sauce', category: 'Wet goods', supplier: 'Bidfood', packSize: 4, packUnit: 'l', packPrice: 22.4, yieldPct: 100, density: 1.05 },
-      { id: 'ing-cheese', name: 'Mozzarella shredded', category: 'Dairy & eggs', supplier: 'Bidfood', packSize: 2, packUnit: 'kg', packPrice: 24.6, yieldPct: 100 },
-      { id: 'ing-ham', name: 'Sliced leg ham', category: 'Smallgoods', supplier: 'Bidfood', packSize: 1.5, packUnit: 'kg', packPrice: 21.0, yieldPct: 100 },
-      { id: 'ing-potato', name: 'Frozen chips 10mm', category: 'Frozen', supplier: 'Bidfood', packSize: 10, packUnit: 'kg', packPrice: 26.0, yieldPct: 100 },
+      { id: 'ing-flour', location: 'Dry store', name: 'Plain flour', category: 'Dry goods', supplier: 'Bidfood', packSize: 12.5, packUnit: 'kg', packPrice: 18.75, yieldPct: 100 },
+      { id: 'ing-crumb', location: 'Dry store', name: 'Panko breadcrumb', category: 'Dry goods', supplier: 'Bidfood', packSize: 10, packUnit: 'kg', packPrice: 42.0, yieldPct: 100 },
+      { id: 'ing-egg', location: 'Coolroom', name: 'Eggs 55g', category: 'Dairy & eggs', supplier: 'Bidfood', packSize: 15, packUnit: 'doz', packPrice: 72.0, yieldPct: 100 },
+      { id: 'ing-oil', location: 'Dry store', name: 'Vegetable oil', category: 'Oils', supplier: 'Bidfood', packSize: 20, packUnit: 'l', packPrice: 48.0, yieldPct: 100, density: 0.92 },
+      { id: 'ing-salt', location: 'Dry store', name: 'Fine salt', category: 'Dry goods', supplier: 'Bidfood', packSize: 2, packUnit: 'kg', packPrice: 3.2, yieldPct: 100 },
+      { id: 'ing-pepper', location: 'Dry store', name: 'Cracked pepper', category: 'Dry goods', supplier: 'Bidfood', packSize: 500, packUnit: 'g', packPrice: 14.5, yieldPct: 100 },
+      { id: 'ing-paprika', location: 'Dry store', name: 'Smoked paprika', category: 'Dry goods', supplier: 'Bidfood', packSize: 500, packUnit: 'g', packPrice: 16.8, yieldPct: 100 },
+      { id: 'ing-napoli', location: 'Dry store', name: 'Napoli sauce', category: 'Wet goods', supplier: 'Bidfood', packSize: 4, packUnit: 'l', packPrice: 22.4, yieldPct: 100, density: 1.05 },
+      { id: 'ing-cheese', location: 'Coolroom', name: 'Mozzarella shredded', category: 'Dairy & eggs', supplier: 'Bidfood', packSize: 2, packUnit: 'kg', packPrice: 24.6, yieldPct: 100 },
+      { id: 'ing-ham', location: 'Coolroom', name: 'Sliced leg ham', category: 'Smallgoods', supplier: 'Bidfood', packSize: 1.5, packUnit: 'kg', packPrice: 21.0, yieldPct: 100 },
+      { id: 'ing-potato', location: 'Freezer', name: 'Frozen chips 10mm', category: 'Frozen', supplier: 'Bidfood', packSize: 10, packUnit: 'kg', packPrice: 26.0, yieldPct: 100 },
       // Bought by the head but used by weight, so the pack is expressed in
       // grams — a whole head runs about 500g before the core and outer leaves.
-      { id: 'ing-lettuce', name: 'Iceberg lettuce', category: 'Produce', supplier: 'Market', packSize: 500, packUnit: 'g', packPrice: 3.4, yieldPct: 74 },
-      { id: 'ing-tomato', name: 'Tomato', category: 'Produce', supplier: 'Market', packSize: 5, packUnit: 'kg', packPrice: 21.0, yieldPct: 91 },
-      { id: 'ing-bun', name: 'Brioche bun', category: 'Bakery', supplier: 'Bidfood', packSize: 48, packUnit: 'ea', packPrice: 28.8, yieldPct: 100 },
-      { id: 'ing-mayo', name: 'Whole egg mayonnaise', category: 'Wet goods', supplier: 'Bidfood', packSize: 3, packUnit: 'l', packPrice: 19.5, yieldPct: 100, density: 0.94 },
+      { id: 'ing-lettuce', location: 'Coolroom', name: 'Iceberg lettuce', category: 'Produce', supplier: 'Market', packSize: 500, packUnit: 'g', packPrice: 3.4, yieldPct: 74 },
+      { id: 'ing-tomato', location: 'Coolroom', name: 'Tomato', category: 'Produce', supplier: 'Market', packSize: 5, packUnit: 'kg', packPrice: 21.0, yieldPct: 91 },
+      { id: 'ing-bun', location: 'Dry store', name: 'Brioche bun', category: 'Bakery', supplier: 'Bidfood', packSize: 48, packUnit: 'ea', packPrice: 28.8, yieldPct: 100 },
+      { id: 'ing-mayo', location: 'Dry store', name: 'Whole egg mayonnaise', category: 'Wet goods', supplier: 'Bidfood', packSize: 3, packUnit: 'l', packPrice: 19.5, yieldPct: 100, density: 0.94 },
     ];
 
     // Sales are per venue: the menu is costed once for the group, but each
@@ -236,6 +236,38 @@ const Store = (() => {
       },
     ];
 
+    // A closed July stocktake for Flemington. The counts are chosen so the
+    // variance report has something true to say: most loss sits in chips,
+    // breast and the premade schnitzel — waste, over-portioning, shrinkage.
+    const stocktakes = [
+      {
+        id: 'st-sample', venueId: 'ven-flem', status: 'closed',
+        periodStart: '2026-07-01', periodEnd: '2026-07-31',
+        lines: [
+          { ingredientId: 'ing-potato', openQty: 6, purchasedQty: 22, countedQty: 3.1 },
+          { ingredientId: 'ing-breast', openQty: 4, purchasedQty: 16, countedQty: 2.4 },
+          { ingredientId: 'ing-gt-schnitzel', openQty: 2, purchasedQty: 8, countedQty: 1.7 },
+          { ingredientId: 'ing-wholebird', openQty: 2, purchasedQty: 5, countedQty: 1.5 },
+          { ingredientId: 'ing-thigh', openQty: 2, purchasedQty: 7, countedQty: 1.9 },
+          { ingredientId: 'ing-cheese', openQty: 3, purchasedQty: 9, countedQty: 2.6 },
+          { ingredientId: 'ing-oil', openQty: 1, purchasedQty: 1.5, countedQty: 0.65 },
+          { ingredientId: 'ing-crumb', openQty: 1, purchasedQty: 3.5, countedQty: 0.8 },
+          { ingredientId: 'ing-napoli', openQty: 2, purchasedQty: 5, countedQty: 1.95 },
+          { ingredientId: 'ing-ham', openQty: 2, purchasedQty: 7, countedQty: 1.5 },
+          { ingredientId: 'ing-mayo', openQty: 1, purchasedQty: 3.6, countedQty: 0.8 },
+          { ingredientId: 'ing-gt-tenders', openQty: 1, purchasedQty: 3.5, countedQty: 0.75 },
+          { ingredientId: 'ing-bun', openQty: 2, purchasedQty: 8, countedQty: 2.1 },
+          { ingredientId: 'ing-egg', openQty: 1, purchasedQty: 3, countedQty: 0.8 },
+          { ingredientId: 'ing-lettuce', openQty: 4, purchasedQty: 16, countedQty: 3 },
+          { ingredientId: 'ing-tomato', openQty: 1, purchasedQty: 1.5, countedQty: 0.75 },
+          { ingredientId: 'ing-flour', openQty: 1, purchasedQty: 0, countedQty: 0.4 },
+          { ingredientId: 'ing-salt', openQty: 1, purchasedQty: 0.5, countedQty: 0.3 },
+          { ingredientId: 'ing-pepper', openQty: 1, purchasedQty: 0, countedQty: 0.25 },
+          { ingredientId: 'ing-paprika', openQty: 1, purchasedQty: 0.5, countedQty: 0.42 },
+        ],
+      },
+    ];
+
     return {
       activeClientId: 'cli-sample',
       clients: [{
@@ -245,7 +277,7 @@ const Store = (() => {
           { id: 'ven-flem', name: 'Flemington' },
           { id: 'ven-kens', name: 'Kensington' },
         ],
-        ingredients, recipes, suppliers, orders,
+        ingredients, recipes, suppliers, orders, stocktakes,
         settings: { ...defaultSettings(), business: 'The Local Hotel Group' },
       }],
     };
@@ -260,7 +292,7 @@ const Store = (() => {
       id: uid('cli'),
       name: name || 'New client',
       venues: [{ id: uid('ven'), name: 'Main venue' }],
-      ingredients: [], recipes: [], suppliers: [], orders: [],
+      ingredients: [], recipes: [], suppliers: [], orders: [], stocktakes: [],
       settings: { ...defaultSettings(), business: name || '' },
     };
   }
@@ -283,6 +315,7 @@ const Store = (() => {
       changed = true;
     }
     if (!Array.isArray(client.orders)) { client.orders = []; changed = true; }
+    if (!Array.isArray(client.stocktakes)) { client.stocktakes = []; changed = true; }
 
     for (const ing of client.ingredients || []) {
       if (!Array.isArray(ing.offers) || !ing.offers.length) {
@@ -620,6 +653,61 @@ const Store = (() => {
     if (idx >= 0) { list.splice(idx, 1); save(); }
   }
 
+  // ---- stocktakes ----
+
+  function stocktakes() { return activeClient().stocktakes; }
+
+  function getStocktake(id) { return stocktakes().find((s) => s.id === id) || null; }
+
+  /**
+   * Start a count for a venue. Opening balances carry over from the venue's
+   * most recent closed stocktake; purchases prefill from received orders in
+   * the period. Both stay editable — prefills are a head start, not gospel.
+   */
+  function createStocktake(venueId, periodStart, periodEnd) {
+    const prev = stocktakes()
+      .filter((s) => s.venueId === venueId && s.status === 'closed')
+      .sort((a, b) => (b.periodEnd || '').localeCompare(a.periodEnd || ''))[0] || null;
+    const openBy = {};
+    if (prev) for (const l of prev.lines || []) openBy[l.ingredientId] = Number(l.countedQty) || 0;
+
+    const purchases = Stocktake.purchasesFromOrders(
+      orders(), ingredients(), venueId, periodStart, periodEnd);
+
+    const st = {
+      id: uid('st'),
+      venueId, periodStart, periodEnd,
+      status: 'open',
+      lines: ingredients().map((i) => ({
+        ingredientId: i.id,
+        openQty: openBy[i.id] != null ? openBy[i.id] : 0,
+        purchasedQty: purchases[i.id] != null ? purchases[i.id] : 0,
+        countedQty: null,
+      })),
+    };
+    stocktakes().push(st);
+    save();
+    return st;
+  }
+
+  function upsertStocktake(data) {
+    const list = stocktakes();
+    const idx = list.findIndex((s) => s.id === data.id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...data }; save(); return list[idx]; }
+    return null;
+  }
+
+  function deleteStocktake(id) {
+    const list = stocktakes();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx >= 0) { list.splice(idx, 1); save(); }
+  }
+
+  /** Storage locations already in use, for the ingredient editor's datalist. */
+  function locations() {
+    return [...new Set(ingredients().map((i) => (i.location || '').trim()).filter(Boolean))].sort();
+  }
+
   // ---- ingredients & recipes ----
 
   function getIngredient(id) { return ingredients().find((i) => i.id === id) || null; }
@@ -735,6 +823,7 @@ const Store = (() => {
     client.recipes = [];
     client.suppliers = [];
     client.orders = [];
+    client.stocktakes = [];
     client.venues = [{ id: uid('ven'), name: 'Main venue' }];
     save();
     return state;
@@ -747,6 +836,7 @@ const Store = (() => {
     ingredients, recipes, suppliers, settings, ctx,
     recipesWithSales, salesCtx,
     orders, getOrder, nextOrderRef, upsertOrder, deleteOrder,
+    stocktakes, getStocktake, createStocktake, upsertStocktake, deleteStocktake, locations,
     upsertSupplier, supplierByName, supplierUsage, deleteSupplier,
     addOffer, deleteOffer, setPreferredOffer,
     getIngredient, getRecipe, upsertIngredient, upsertRecipe,

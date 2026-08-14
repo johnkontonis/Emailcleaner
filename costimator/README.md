@@ -141,6 +141,31 @@ Total adjustment requested: $29.80
 Lines that can't be matched, and lines with no agreed price on file, are reported
 separately rather than quietly passed.
 
+**Stocktake** — count the shelf per venue, in packs, on a sheet grouped by
+storage location. Opening balances carry over from the venue's previous count
+and purchases prefill from received purchase orders, so only the closing count
+is real work. Closing runs the equation that makes wastage visible:
+
+```
+actual usage      = opening + purchases − closing count
+theoretical usage = what the recipes account for, at this venue's sales
+variance          = actual − theoretical   →  the loss nobody planned
+```
+
+Declared yields and batch wastage are *expected* loss, so they sit in the
+theoretical side — the variance is only what nothing explains: over-portioning,
+prep waste, spoilage, shrinkage. Each item is valued at its current pack price
+and ranked by dollar impact, and the report says it in menu terms:
+
+> The menu says **21.1%** food cost; the stockroom says **22.2%**. The gap is
+> the unexplained $235.70 — chicken breast alone carries 26% of it.
+
+Closed stocktakes freeze their report, so later price changes don't rewrite
+history. Impossible counts (more closing stock than opening + purchases can
+supply) are flagged as count errors, not booked as gains; movements left
+uncounted are warned about before closing, because counting-to-zero books all
+of that stock as used.
+
 **Price impact** — put a supplier increase through the whole menu before it
 lands on your invoice. Enter `12` against chicken breast and you get every
 affected dish, the cost movement, the GP before and after, and which dishes drop
@@ -168,7 +193,9 @@ js/suppliers.js           # offer comparison, switch impact, invoice reconciliat
 js/store.js               # clients/venues, orders, localStorage persistence, migrations
 js/app.js                 # rendering and interaction
 js/tests.js               # costing engine tests
+js/stocktake.js           # usage explosion, variance-to-COGS analysis
 js/tests-suppliers.js     # supplier and reconciliation tests
+js/tests-stocktake.js     # stocktake tests, incl. the usage=COGS invariant
 tests/smoke.js            # browser test — drives the real UI
 scripts/make_icons.py     # regenerate app icons
 sw.js                     # offline cache
@@ -177,7 +204,7 @@ sw.js                     # offline cache
 ## Tests
 
 ```bash
-npm test              # costing + supplier engines — 190 assertions, no dependencies
+npm test              # costing + supplier + stocktake engines — 225 assertions
 npm run test:browser  # drives the real UI in Chromium (needs: npm install)
 ```
 
@@ -224,6 +251,10 @@ CHROMIUM_PATH=/path/to/chrome npm run test:browser
 - **The PO locks the agreed price at order time.** A later price-list change
   doesn't rewrite history — the invoice is matched against what was actually
   ordered.
+- **Theoretical usage and menu COGS are one calculation.** The stocktake's
+  "should have used", valued at raw pack prices, equals the menu's theoretical
+  COGS to the cent — tested as an invariant. If the two ever disagreed, one of
+  them would be lying.
 - **Quantity gaps are questions, not claims.** An invoice shows what was billed,
   not what arrived; only a delivery docket proves receipt, so short and over
   deliveries are queried rather than deducted.
@@ -241,7 +272,7 @@ costing with operations. Where this build stands:
 | Ordering with PO → invoice cross-match | ✔ | manual paste/CSV for the invoice |
 | Live distributor price feeds | ✖ | needs supplier integrations or a server |
 | POS sales sync | ✖ | volumes are keyed in; a POS export could be imported |
-| Stocktake / inventory counts | ✖ | a natural next module — the library already knows every product |
+| Stocktake with variance-to-COGS | ✔ | count sheets by location; unexplained loss valued per item |
 | Accounting sync (Xero etc.) | ✖ | needs a server and OAuth |
 | Automatic invoice ingestion from email | ✖ | see below |
 

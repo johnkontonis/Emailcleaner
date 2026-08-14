@@ -365,6 +365,74 @@ const shot = async (page, name) => {
     (await page.locator('tr[data-ingredient]').count()) >= 20,
     `${await page.locator('tr[data-ingredient]').count()} rows`);
 
+  // ---- stocktake ----
+  await page.click('.tab[data-view="stocktake"]');
+  await page.waitForSelector('tr[data-stocktake]');
+  check('the sample stocktake is listed', (await page.locator('tr[data-stocktake]').count()) === 1);
+  check('the closed stocktake shows its unexplained variance',
+    (await page.locator('tr[data-stocktake] .pill.bad').textContent()).includes('$235.70'),
+    await page.locator('tr[data-stocktake] .pill.bad').textContent());
+
+  // Open the report from the row.
+  await page.click('tr[data-stocktake]');
+  await page.waitForSelector('.modal-panel.wide');
+  const stStats = await page.locator('.modal-body .stat-value').allTextContents();
+  check('the report leads with the unexplained figure', stStats[0] === '+$235.70', stStats.join(' | '));
+  check('actual and theoretical COGS are both shown',
+    stStats[1] === '$4717.29' && stStats[2] === '$4481.60', stStats.join(' | '));
+  const verdictLine = await page.locator('.modal-body .mvb-verdict').textContent();
+  check('food cost is stated both ways',
+    verdictLine.includes('21.1%') && verdictLine.includes('22.2%'), verdictLine.trim().slice(0, 120));
+  check('the worst offender is named',
+    (await page.locator('.modal-body .banner').first().textContent()).includes('Chicken breast fillet'));
+  const pills = await page.locator('.modal-body tbody .pill').allTextContents();
+  check('waste and clean lines are told apart',
+    pills.includes('waste') && pills.includes('ok'), pills.slice(0, 8).join(','));
+  await shot(page, '13-stocktake-report.png');
+  await page.click('.modal-head [data-close]');
+  await page.waitForTimeout(150);
+
+  // New stocktake: opening carries from July's close, purchases from the
+  // received PO (the order was marked received earlier in this test).
+  await page.click('[data-act="new-stocktake"]');
+  await page.waitForSelector('#stk-venue');
+  check('the period start follows the last close',
+    (await page.inputValue('#stk-start')) === '2026-08-01',
+    await page.inputValue('#stk-start'));
+  await page.click('[data-act="create-stocktake"]');
+  await page.waitForSelector('#count-sheet');
+  check('the count sheet groups by storage location',
+    (await page.locator('#count-sheet .section-title').allTextContents()).includes('Freezer'));
+
+  const schnRow = page.locator('.count-row', { hasText: 'Crumbed chicken schnitzel' }).first();
+  check('opening prefills from the previous close',
+    (await schnRow.locator('[data-f="openQty"]').inputValue()) === '1.7',
+    await schnRow.locator('[data-f="openQty"]').inputValue());
+  check('purchases prefill from the received order',
+    (await schnRow.locator('[data-f="purchasedQty"]').inputValue()) === '4',
+    await schnRow.locator('[data-f="purchasedQty"]').inputValue());
+
+  await schnRow.locator('[data-f="countedQty"]').fill('2.5');
+  await schnRow.locator('[data-f="countedQty"]').blur();
+  await page.waitForTimeout(150);
+  check('counting values the line at the pack price',
+    (await schnRow.locator('.line-cost').textContent()).includes('240.00'),
+    await schnRow.locator('.line-cost').textContent());
+  check('progress tracks the count',
+    (await page.locator('#count-progress').textContent()).includes('1 of'),
+    await page.locator('#count-progress').textContent());
+  await shot(page, '14-count-sheet.png');
+
+  // Closing with uncounted movement lines warns first; accept it.
+  page.once('dialog', (d) => d.accept());
+  await page.click('[data-act="close-stocktake"]');
+  await page.waitForSelector('.modal-panel.wide .stat-value');
+  check('closing produces the report', (await page.locator('.modal-body .stat-value').count()) === 4);
+  await page.click('.modal-head [data-close]');
+  await page.waitForTimeout(200);
+  check('the closed stocktake joins the list',
+    (await page.locator('tr[data-stocktake]').count()) === 2);
+
   // ---- persistence ----
   await page.click('.tab[data-view="recipes"]');
   await page.waitForSelector('#recipe-search');
