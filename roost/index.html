@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Costimator</title>
-<meta name="description" content="Cost recipes to the cent: ingredient library, sub-recipes, yield factors, portion cost and GP% menu analysis.">
-<meta name="theme-color" content="#12181f">
+<title>Roost</title>
+<meta name="description" content="Roost — menu costing and kitchen control: recipes, supplier prices, purchase orders, invoices and stocktake, with GP analysis weighted by sales.">
+<meta name="theme-color" content="#1a1a1a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -16,10 +16,19 @@
 <header class="topbar">
   <div class="topbar-row">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">◧</span>
+      <svg class="brand-mark" viewBox="0 0 90 90" aria-hidden="true">
+        <!-- the roost mark: a bird settled on its perch -->
+        <circle cx="30" cy="24" r="9" fill="#e8a020"/>
+        <circle cx="45" cy="17" r="9" fill="#e8a020"/>
+        <circle cx="60" cy="24" r="9" fill="#e8a020"/>
+        <circle cx="45" cy="46" r="23" fill="#e8a020"/>
+        <polygon points="66,40 82,47 66,54" fill="#e8a020"/>
+        <circle cx="53" cy="40" r="4" fill="#1a1a1a"/>
+        <rect x="12" y="74" width="66" height="6" rx="3" fill="#e8a020"/>
+      </svg>
       <div>
-        <h1>Costimator</h1>
-        <p class="brand-sub">Recipe &amp; menu costing</p>
+        <h1>Roost</h1>
+        <p class="brand-sub">Menu costing &amp; kitchen control</p>
       </div>
     </div>
     <select id="client-select" class="client-select" aria-label="Client"></select>

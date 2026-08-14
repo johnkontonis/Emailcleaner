@@ -1516,7 +1516,7 @@
       </div>` : '<div class="empty card">No invoice lines matched this order.</div>'}
 
       ${r.clean ? `
-        <div class="banner warn" style="background:rgba(53,192,138,0.09);border-color:rgba(53,192,138,0.35);color:var(--good)">
+        <div class="banner warn" style="background:rgba(126,195,80,0.09);border-color:rgba(126,195,80,0.35);color:var(--good)">
           Invoice matches ${esc(r.order.ref)} on price and quantity.
           <button class="btn small" data-act="order-received" data-id="${esc(r.order.id)}" style="margin-left:10px">Mark order received</button>
         </div>` : `
@@ -1876,7 +1876,7 @@
         <strong>${esc(r.worst.name)}</strong> alone carries ${pct(r.worst.shareOfVariance, 0)} of it
         (${r.worst.varianceValue > 0 ? '+' : ''}${money(r.worst.varianceValue)}).</div>`);
     } else if (st.status === 'closed') {
-      banners.push('<div class="banner warn" style="background:rgba(53,192,138,0.09);border-color:rgba(53,192,138,0.35);color:var(--good)">Stock movements match the menu — nothing unexplained.</div>');
+      banners.push('<div class="banner warn" style="background:rgba(126,195,80,0.09);border-color:rgba(126,195,80,0.35);color:var(--good)">Stock movements match the menu — nothing unexplained.</div>');
     }
     if (r.uncountedLines) {
       banners.push(`<div class="banner warn">${r.uncountedLines} line${r.uncountedLines > 1 ? 's' : ''} had
@@ -2054,7 +2054,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `costimator-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `roost-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();

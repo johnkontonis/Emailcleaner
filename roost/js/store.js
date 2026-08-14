@@ -10,8 +10,10 @@
 // the rest of the app never has to know about any client but the current one.
 
 const Store = (() => {
-  const KEY = 'costimator:v2';
-  const LEGACY_KEY = 'costimator:v1';
+  const KEY = 'roost:v1';
+  // Data written under the working title keeps loading — nobody re-enters
+  // a price because the product got a name.
+  const LEGACY_KEYS = ['costimator:v2', 'costimator:v1'];
 
   const uid = (prefix) =>
     `${prefix}-${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
@@ -419,15 +421,9 @@ const Store = (() => {
   function load() {
     if (state) return state;
     try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        state = JSON.parse(raw);
-      } else {
-        // First run on v2: pick up a v1 dataset if one exists rather than
-        // dropping the user back to sample data.
-        const legacy = localStorage.getItem(LEGACY_KEY);
-        state = legacy ? JSON.parse(legacy) : seed();
-      }
+      const raw = localStorage.getItem(KEY)
+        || LEGACY_KEYS.map((k) => localStorage.getItem(k)).find(Boolean);
+      state = raw ? JSON.parse(raw) : seed();
     } catch (err) {
       console.warn('Could not read saved data, starting from the sample set.', err);
       state = seed();
@@ -798,7 +794,7 @@ const Store = (() => {
     const isV2 = parsed && Array.isArray(parsed.clients);
     const isV1 = parsed && Array.isArray(parsed.ingredients) && Array.isArray(parsed.recipes);
     if (!isV2 && !isV1) {
-      throw new Error('That file does not look like a Costimator export.');
+      throw new Error('That file does not look like a Roost export.');
     }
     state = isV2
       ? { activeClientId: parsed.activeClientId, clients: parsed.clients }

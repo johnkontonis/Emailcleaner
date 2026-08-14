@@ -457,7 +457,7 @@ const shot = async (page, name) => {
   check('export produces a file', !!download, 'no download event');
   if (download) {
     check('export filename is dated',
-      /costimator-\d{4}-\d{2}-\d{2}\.json/.test(download.suggestedFilename()),
+      /roost-\d{4}-\d{2}-\d{2}\.json/.test(download.suggestedFilename()),
       download.suggestedFilename());
   }
 

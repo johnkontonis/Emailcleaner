@@ -1,6 +1,6 @@
 // Cache-first service worker. The point is a kitchen office with flaky wifi:
 // once loaded, the app opens offline. Bump CACHE when files change.
-const CACHE = 'costimator-v1';
+const CACHE = 'roost-v1';
 
 const ASSETS = [
   './',

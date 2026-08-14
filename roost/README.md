@@ -1,11 +1,16 @@
-# Costimator
+# Roost
 
-Recipe and menu costing for hospitality kitchens. Build an ingredient library
-from what you actually buy, assemble recipes and sub-recipes from it, and see
-portion cost, gross profit and menu performance update as you type.
+Menu costing and kitchen control for hospitality groups. Build an ingredient
+library from what you actually buy, assemble recipes and sub-recipes from it,
+and see portion cost, gross profit and menu performance update as you type —
+then order against agreed prices, match the invoices, and count the stock.
 
 An independent build — not affiliated with, or derived from the code of, any
-commercial costing product.
+commercial costing product. (Earlier working title was "Costimator"; renamed —
+that name belongs to an existing product.)
+
+Brand: G&T Chickens palette — black `#1A1A1A`, white, amber `#E8A020`; green
+and red are semantic only (pass/fail), never brand colours.
 
 ## Run it
 

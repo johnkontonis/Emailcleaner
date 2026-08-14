@@ -64,7 +64,7 @@ def build():
 
 
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "dist", "costimator.html")
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "dist", "roost.html")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     html = build()
     with open(out, "w", encoding="utf-8") as fh:
