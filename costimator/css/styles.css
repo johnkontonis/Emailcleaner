@@ -36,7 +36,12 @@ h1, h2, h3 { margin: 0; font-weight: 620; letter-spacing: -0.01em; }
   padding: 0 20px;
 }
 
+.topbar-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .brand { display: flex; align-items: center; gap: 12px; padding: 14px 0 10px; }
+.client-select {
+  width: auto; max-width: 230px; font-size: 13px; padding: 6px 28px 6px 10px;
+  background: var(--surface-2); border-color: var(--line); border-radius: 7px;
+}
 .brand h1 { font-size: 19px; }
 .brand-mark { color: var(--accent); font-size: 22px; line-height: 1; }
 .brand-sub { margin: 1px 0 0; font-size: 12px; color: var(--muted); }

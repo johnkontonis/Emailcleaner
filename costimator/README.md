@@ -26,6 +26,14 @@ put your own numbers in.
 
 ## What it does
 
+**Clients & venues** — the app holds any number of clients, each a separate
+business with its own library, menu, suppliers and orders; switch between them
+from the header. Within a client, recipes, ingredients and supplier pricing are
+shared across the whole group — a group costs one menu, not one menu per site.
+What differs by site is sales: volumes are recorded per venue, and the
+dashboard reads group-wide or filtered to one venue, so a dish can be a Star
+across the group and a Dog at one site.
+
 **Ingredients** — what you buy, at the pack size you buy it in. Enter a 10 kg
 box at $62.50 and it works out the cost per gram. A **yield %** covers what you
 lose to trim, peel or bone-out: a whole bird at 68% usable costs you 1/0.68 more
@@ -101,6 +109,22 @@ Every affected dish is listed with its volume rank, per-serve movement, period
 total and share of the change — so a saving spread thinly across the menu reads
 differently from one riding almost entirely on one dish.
 
+**Purchase orders** — raise an order per venue from a supplier's products at
+your **agreed prices** (the PO locks the price at order time), email it with
+the PO number, and track it draft → sent → received.
+
+**PO-to-invoice matching** — when the invoice lands, match it against its PO.
+Four things can be wrong and each is kept separate:
+
+| Bucket | Meaning | Treatment |
+|---|---|---|
+| Price | invoiced above the PO price | credit claimed, itemised |
+| Quantity | more or fewer packs than ordered | asked about — a delivery docket, not an invoice, proves arrival |
+| Never ordered | invoiced lines not on the PO | confirmation or credit requested |
+| Not invoiced | ordered lines missing | chase stock, not money |
+
+A clean match can mark the order received on the spot.
+
 **Invoice checking** — paste or drop in a supplier invoice (CSV or tab-separated,
 header optional). Every line is matched to your library by product code, then by
 name, and compared against the agreed price. You get the variance per unit and
@@ -136,12 +160,12 @@ backups, and Import to restore or move between machines.
 ## Project layout
 
 ```
-index.html                # screens: dashboard, recipes, ingredients, suppliers, invoices, data
+index.html                # screens: dashboard, recipes, ingredients, suppliers, orders, invoices, data
 css/styles.css            # styling
 js/units.js               # unit conversion — mass/volume/count, density-aware
 js/costing.js             # the costing engine (pure functions, no DOM)
 js/suppliers.js           # offer comparison, switch impact, invoice reconciliation
-js/store.js               # localStorage persistence, migrations, import/export
+js/store.js               # clients/venues, orders, localStorage persistence, migrations
 js/app.js                 # rendering and interaction
 js/tests.js               # costing engine tests
 js/tests-suppliers.js     # supplier and reconciliation tests
@@ -153,7 +177,7 @@ sw.js                     # offline cache
 ## Tests
 
 ```bash
-npm test              # costing + supplier engines — 164 assertions, no dependencies
+npm test              # costing + supplier engines — 190 assertions, no dependencies
 npm run test:browser  # drives the real UI in Chromium (needs: npm install)
 ```
 
@@ -195,8 +219,31 @@ CHROMIUM_PATH=/path/to/chrome npm run test:browser
 - **Invoice lines that can't be matched are reported, not skipped.** So are lines
   with no agreed price. A reconciliation that quietly ignores what it doesn't
   understand is worse than none.
-- **Nothing is emailed automatically.** The claim is drafted for you to read and
-  send. See below.
+- **Nothing is emailed automatically.** Orders and claims are drafted for you to
+  read and send. See below.
+- **The PO locks the agreed price at order time.** A later price-list change
+  doesn't rewrite history — the invoice is matched against what was actually
+  ordered.
+- **Quantity gaps are questions, not claims.** An invoice shows what was billed,
+  not what arrived; only a delivery docket proves receipt, so short and over
+  deliveries are queried rather than deducted.
+
+## Feature map against commercial kitchen platforms
+
+Commercial products in this space (e.g. My Local Foodie's Costimator) bundle
+costing with operations. Where this build stands:
+
+| Capability | Here | Notes |
+|---|---|---|
+| Recipe / sub-recipe costing, yields, GP | ✔ | |
+| Multi-venue groups | ✔ | shared menu, per-venue sales |
+| Supplier price lists & agreed prices | ✔ | |
+| Ordering with PO → invoice cross-match | ✔ | manual paste/CSV for the invoice |
+| Live distributor price feeds | ✖ | needs supplier integrations or a server |
+| POS sales sync | ✖ | volumes are keyed in; a POS export could be imported |
+| Stocktake / inventory counts | ✖ | a natural next module — the library already knows every product |
+| Accounting sync (Xero etc.) | ✖ | needs a server and OAuth |
+| Automatic invoice ingestion from email | ✖ | see below |
 
 ## Automatic invoice email — what's missing
 

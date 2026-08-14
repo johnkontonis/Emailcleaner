@@ -14,18 +14,22 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-mark" aria-hidden="true">◧</span>
-    <div>
-      <h1>Costimator</h1>
-      <p class="brand-sub">Recipe &amp; menu costing</p>
+  <div class="topbar-row">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">◧</span>
+      <div>
+        <h1>Costimator</h1>
+        <p class="brand-sub">Recipe &amp; menu costing</p>
+      </div>
     </div>
+    <select id="client-select" class="client-select" aria-label="Client"></select>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" data-view="dashboard">Dashboard</button>
     <button class="tab" role="tab" data-view="recipes">Recipes</button>
     <button class="tab" role="tab" data-view="ingredients">Ingredients</button>
     <button class="tab" role="tab" data-view="suppliers">Suppliers</button>
+    <button class="tab" role="tab" data-view="orders">Orders</button>
     <button class="tab" role="tab" data-view="invoices">Invoices</button>
     <button class="tab" role="tab" data-view="data">Data</button>
   </nav>

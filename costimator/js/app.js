@@ -14,6 +14,7 @@
   const pct = (n, dp = 1) => `${(Number(n) || 0).toFixed(dp)}%`;
 
   let currentView = 'dashboard';
+  let dashVenue = ''; // '' = whole group
   let toastTimer = null;
 
   function toast(message) {
@@ -100,8 +101,13 @@
   }
 
   function renderDashboard() {
-    const ctx = Store.ctx();
+    const venues = Store.venues();
+    if (dashVenue && !venues.some((v) => v.id === dashVenue)) dashVenue = '';
+    const ctx = Store.salesCtx(dashVenue || null);
     const a = Costing.analyseMenu(ctx.recipes, ctx);
+    const scopeName = dashVenue
+      ? (Store.getVenue(dashVenue) || {}).name
+      : 'whole group';
 
     if (a.itemCount === 0) {
       view.innerHTML = `
@@ -152,8 +158,16 @@
 
     view.innerHTML = `
       <div class="view-head">
-        <div><h2>Dashboard</h2><p>Menu performance across every costed dish. Figures are ex-GST.</p></div>
-        <button class="btn primary" data-act="new-recipe">New recipe</button>
+        <div><h2>${esc(Store.activeClient().name)}</h2>
+          <p>Menu performance across every costed dish — ${esc(scopeName)}, ex-GST.</p></div>
+        <div class="row">
+          ${venues.length > 1 ? `
+          <select id="dash-venue" aria-label="Venue">
+            <option value="">All venues</option>
+            ${venues.map((v) => `<option value="${esc(v.id)}"${v.id === dashVenue ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}
+          </select>` : ''}
+          <button class="btn primary" data-act="new-recipe">New recipe</button>
+        </div>
       </div>
 
       ${a.belowTarget > 0 ? `<div class="banner warn">${a.belowTarget} of ${a.itemCount} dishes sit below their target GP.</div>` : ''}
@@ -187,6 +201,12 @@
 
       <div class="section-title">Menu engineering</div>
       <div class="quadrant-grid">${quads}</div>`;
+
+    const venueSel = $('#dash-venue');
+    if (venueSel) venueSel.addEventListener('change', (e) => {
+      dashVenue = e.target.value;
+      renderDashboard();
+    });
   }
 
   // ================= RECIPES =================
@@ -260,7 +280,7 @@
       : {
           id: null, name: '', type: 'menu', onMenu: true, lines: [],
           batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
-          sellPrice: 0, taxRate: s.taxRate, targetGpPct: s.targetGpPct, unitsSold: 0, method: '',
+          sellPrice: 0, taxRate: s.taxRate, targetGpPct: s.targetGpPct, salesByVenue: {}, method: '',
         };
     if (!draft) return;
 
@@ -401,10 +421,12 @@
           <label for="f-target">Target GP %</label>
           <input id="f-target" type="number" step="any" min="0" max="99" data-f="targetGpPct" value="${esc(draft.targetGpPct)}">
         </div>
+        ${Store.venues().map((v) => `
         <div class="field">
-          <label for="f-sold">Units sold (period)</label>
-          <input id="f-sold" type="number" step="1" min="0" data-f="unitsSold" value="${esc(draft.unitsSold || 0)}">
-        </div>`}
+          <label for="f-sold-${esc(v.id)}">Sold — ${esc(v.name)}</label>
+          <input id="f-sold-${esc(v.id)}" type="number" step="1" min="0" data-vsales="${esc(v.id)}"
+                 value="${esc((draft.salesByVenue || {})[v.id] || 0)}">
+        </div>`).join('')}`}
       </div>
 
       <div class="section-title">Costing</div>
@@ -438,7 +460,8 @@
   function makeVsBuyPanel(costed, recipe) {
     const m = costed.makeVsBuy;
     const gap = Math.abs(m.difference);
-    const sold = Number(recipe.unitsSold || 0);
+    const sold = Object.values(recipe.salesByVenue || {})
+      .reduce((s, n) => s + (Number(n) || 0), 0);
     const swapped = m.swappedLines
       .map((s) => `${esc(s.made)} vs ${esc(s.bought)}`)
       .join('; ');
@@ -479,12 +502,20 @@
       const evt = el.tagName === 'SELECT' ? 'change' : 'input';
       el.addEventListener(evt, () => {
         const f = el.dataset.f;
-        const numeric = ['portions', 'batchYieldQty', 'wastagePct', 'sellPrice', 'taxRate', 'targetGpPct', 'unitsSold'];
+        const numeric = ['portions', 'batchYieldQty', 'wastagePct', 'sellPrice', 'taxRate', 'targetGpPct'];
         draft[f] = numeric.includes(f) ? Number(el.value) : el.value;
         if (f === 'type') draft.onMenu = el.value !== 'sub';
         // Text fields would lose the caret on a full re-render; only structural
         // and numeric changes need the costing panel redrawn.
         if (f === 'name' || f === 'method') return;
+        renderEditor();
+      });
+    });
+
+    $$('[data-vsales]', editor).forEach((el) => {
+      el.addEventListener('change', () => {
+        draft.salesByVenue = draft.salesByVenue || {};
+        draft.salesByVenue[el.dataset.vsales] = Number(el.value) || 0;
         renderEditor();
       });
     });
@@ -841,7 +872,8 @@
 
     let impact;
     try {
-      const ctx = Store.ctx();
+      // Group-total sales: switching a supplier is a group decision.
+      const ctx = Store.salesCtx(null);
       // Cost against the unsaved draft, so edits in this modal are reflected.
       const ingredients = ctx.ingredients.some((i) => i.id === ingDraft.id)
         ? ctx.ingredients.map((i) => (i.id === ingDraft.id ? ingDraft : i))
@@ -1026,7 +1058,7 @@
   let impactChanges = {};
 
   function renderSuppliers() {
-    const ctx = Store.ctx();
+    const ctx = Store.salesCtx(null);
     const result = Costing.priceImpact(impactChanges, ctx);
     const changed = Object.keys(impactChanges).filter((k) => Number(impactChanges[k]) !== 0);
 
@@ -1151,35 +1183,231 @@
     });
   }
 
+  // ================= ORDERS =================
+
+  let orderDraft = null;
+
+  function venueName(id) {
+    const v = Store.getVenue(id);
+    return v ? v.name : '—';
+  }
+
+  function renderOrders() {
+    const list = Store.orders().slice()
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '') || (b.ref || '').localeCompare(a.ref || ''));
+
+    const rows = list.map((o) => {
+      const pill = { draft: 'neutral', sent: 'warn', received: 'good' }[o.status] || 'neutral';
+      const actions = {
+        draft: `<button class="btn small" data-act="order-sent" data-id="${esc(o.id)}">Mark sent</button>`,
+        sent: `<button class="btn small primary" data-act="match-order" data-id="${esc(o.id)}">Match invoice</button>
+               <button class="btn small" data-act="order-received" data-id="${esc(o.id)}">Received</button>`,
+      }[o.status] || '';
+      return `
+        <tr class="clickable" data-order="${esc(o.id)}">
+          <td class="name-cell">${esc(o.ref)}<span class="sub-note">${esc(o.createdAt || '')}</span></td>
+          <td>${esc(o.supplier || '—')}</td>
+          <td>${esc(venueName(o.venueId))}</td>
+          <td class="num">${(o.lines || []).length}</td>
+          <td class="num">${money(Suppliers.orderTotal(o))}</td>
+          <td><span class="pill ${pill}">${esc(o.status)}</span></td>
+          <td class="num">${actions}
+            <button class="icon-btn" data-act="del-order" data-id="${esc(o.id)}" title="Delete">✕</button></td>
+        </tr>`;
+    }).join('');
+
+    view.innerHTML = `
+      <div class="view-head">
+        <div><h2>Orders</h2>
+          <p>Purchase orders at your agreed prices. The supplier's invoice gets matched against them line by line.</p></div>
+        <button class="btn primary" data-act="new-order">New order</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>PO</th><th>Supplier</th><th>Deliver to</th><th class="num">Lines</th>
+            <th class="num">Total</th><th>Status</th><th class="num"></th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="empty" style="padding:34px">
+            No orders yet. Raise one, email it to the supplier, and match their invoice against it when it lands.</td></tr>`}</tbody>
+        </table>
+      </div>`;
+  }
+
+  /** Everything this supplier can sell you: ingredients carrying one of their offers. */
+  function supplierProducts(supplierName) {
+    const n = String(supplierName || '').trim().toLowerCase();
+    return Store.ingredients()
+      .map((i) => ({ ingredient: i, offer: (i.offers || []).find((o) => (o.supplier || '').trim().toLowerCase() === n) }))
+      .filter((x) => x.offer)
+      .sort((a, b) => a.ingredient.name.localeCompare(b.ingredient.name));
+  }
+
+  function openOrderEditor(id) {
+    const supplierList = Store.suppliers();
+    if (!supplierList.length) { toast('Add a supplier first.'); return; }
+    orderDraft = id ? structuredClone(Store.getOrder(id)) : {
+      id: null, ref: Store.nextOrderRef(), supplier: supplierList[0].name,
+      venueId: Store.venues()[0].id, status: 'draft',
+      createdAt: new Date().toISOString().slice(0, 10), lines: [],
+    };
+    if (!orderDraft) return;
+
+    openModal(
+      id ? `Edit ${orderDraft.ref}` : `New order ${orderDraft.ref}`,
+      '<div id="order-editor"></div>',
+      `<button class="btn" data-act="copy-order">Copy order text</button>
+       <button class="btn" data-act="email-order">Email order</button>
+       <div class="spacer"></div>
+       <button class="btn" data-close>Cancel</button>
+       <button class="btn primary" data-act="save-order">Save order</button>`,
+      () => renderOrderEditor()
+    );
+  }
+
+  function renderOrderEditor() {
+    const d = orderDraft;
+    const products = supplierProducts(d.supplier);
+    const venues = Store.venues();
+
+    const lineRows = (d.lines || []).map((l, idx) => {
+      const options = products.map((pr) =>
+        `<option value="${esc(pr.ingredient.id)}"${pr.ingredient.id === l.ingredientId ? ' selected' : ''}>${
+          esc(pr.ingredient.name)}${pr.offer.productCode ? ` (${esc(pr.offer.productCode)})` : ''}</option>`).join('');
+      return `
+        <div class="line-row" style="grid-template-columns:1fr 78px 100px 92px auto">
+          <select data-oline="${idx}" data-f="product">${options}</select>
+          <input type="number" step="any" min="0" data-oline="${idx}" data-f="qty" value="${esc(l.qty)}"
+                 aria-label="Packs">
+          <span class="line-cost">@ ${money(l.packPrice)}</span>
+          <span class="line-cost">${money((Number(l.qty) || 0) * (Number(l.packPrice) || 0))}</span>
+          <button class="icon-btn" data-act="del-oline" data-oline="${idx}" title="Remove">✕</button>
+        </div>`;
+    }).join('');
+
+    $('#order-editor').innerHTML = `
+      <div class="field-row">
+        <div class="field"><label for="o-supplier">Supplier</label>
+          <select id="o-supplier">${Store.suppliers().map((s) =>
+            `<option${s.name === d.supplier ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+          <span class="field-hint">Changing supplier clears the lines — pricing is per supplier.</span></div>
+        <div class="field"><label for="o-venue">Deliver to</label>
+          <select id="o-venue">${venues.map((v) =>
+            `<option value="${esc(v.id)}"${v.id === d.venueId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
+        <div class="field"><label for="o-date">Date</label>
+          <input id="o-date" type="date" value="${esc(d.createdAt || '')}"></div>
+      </div>
+
+      <div class="section-title">Lines — at your agreed prices</div>
+      ${lineRows || '<p class="field-hint" style="margin-bottom:10px">Nothing on the order yet.</p>'}
+      <button class="btn small" data-act="add-oline">+ Add product</button>
+      ${products.length ? '' : `<p class="field-hint" style="margin-top:8px;color:var(--warn)">
+        ${esc(d.supplier)} has no products in this client's library — add a supplier price on an ingredient first.</p>`}
+
+      <div class="summary-grid" style="margin-top:16px">
+        <div class="summary-cell"><div class="k">Order total</div><div class="v">${money(Suppliers.orderTotal(d))}</div></div>
+        <div class="summary-cell"><div class="k">Lines</div><div class="v">${(d.lines || []).length}</div></div>
+      </div>`;
+
+    $('#o-supplier').addEventListener('change', (e) => {
+      orderDraft.supplier = e.target.value;
+      orderDraft.lines = [];
+      renderOrderEditor();
+    });
+    $('#o-venue').addEventListener('change', (e) => { orderDraft.venueId = e.target.value; });
+    $('#o-date').addEventListener('change', (e) => { orderDraft.createdAt = e.target.value; });
+
+    $$('[data-oline]', $('#order-editor')).forEach((el) => {
+      if (el.tagName === 'BUTTON') return;
+      el.addEventListener('change', () => {
+        const line = orderDraft.lines[Number(el.dataset.oline)];
+        if (el.dataset.f === 'qty') {
+          line.qty = Number(el.value) || 0;
+        } else {
+          const pr = supplierProducts(orderDraft.supplier).find((x) => x.ingredient.id === el.value);
+          if (pr) {
+            line.ingredientId = pr.ingredient.id;
+            line.offerId = pr.offer.id;
+            // The PO locks the price you agreed, not whatever is being invoiced.
+            line.packPrice = pr.offer.agreedPrice != null ? Number(pr.offer.agreedPrice) : Number(pr.offer.packPrice);
+          }
+        }
+        renderOrderEditor();
+      });
+    });
+
+    $('#order-editor').onclick = (e) => {
+      if (e.target.closest('[data-act="add-oline"]')) {
+        const pr = supplierProducts(orderDraft.supplier)[0];
+        if (!pr) { toast(`No products on file for ${orderDraft.supplier}.`); return; }
+        orderDraft.lines.push({
+          ingredientId: pr.ingredient.id, offerId: pr.offer.id, qty: 1,
+          packPrice: pr.offer.agreedPrice != null ? Number(pr.offer.agreedPrice) : Number(pr.offer.packPrice),
+        });
+        renderOrderEditor();
+        return;
+      }
+      const del = e.target.closest('[data-act="del-oline"]');
+      if (del) { orderDraft.lines.splice(Number(del.dataset.oline), 1); renderOrderEditor(); }
+    };
+  }
+
+  function saveOrder() {
+    if (!orderDraft.supplier) { toast('Pick a supplier.'); return; }
+    if (!orderDraft.lines.length) { toast('Add at least one product.'); return; }
+    Store.upsertOrder(orderDraft.id ? orderDraft : { ...orderDraft, id: undefined });
+    closeModal();
+    toast('Order saved.');
+    render();
+  }
+
+  function orderEmailFor(order) {
+    return Suppliers.orderEmail(order, Store.ctx(), {
+      business: Store.settings().business || '',
+      venueName: venueName(order.venueId),
+    });
+  }
+
   // ================= INVOICES =================
 
   let invoiceText = '';
   let invoiceSupplier = '';
   let invoiceRef = '';
   let invoiceResult = null;
+  let invoiceOrderId = null; // set = matching against a PO, not the price list
 
   function renderInvoices() {
     const suppliers = Store.suppliers().slice().sort((a, b) => a.name.localeCompare(b.name));
+    const matchOrder = invoiceOrderId ? Store.getOrder(invoiceOrderId) : null;
+    if (invoiceOrderId && !matchOrder) invoiceOrderId = null;
 
     view.innerHTML = `
       <div class="view-head">
         <div><h2>Invoices</h2>
-          <p>Check what a supplier billed against what you agreed, and claim the difference.</p></div>
+          <p>${matchOrder
+            ? `Match the supplier's invoice against ${esc(matchOrder.ref)} — price and quantity, line by line.`
+            : 'Check what a supplier billed against what you agreed, and claim the difference.'}</p></div>
       </div>
 
+      ${matchOrder ? `
+      <div class="banner warn">
+        Matching against <strong>${esc(matchOrder.ref)}</strong> — ${esc(matchOrder.supplier)},
+        ${esc(venueName(matchOrder.venueId))}, ordered ${money(Suppliers.orderTotal(matchOrder))}
+        on ${esc(matchOrder.createdAt || '')}.
+        <button class="btn small" data-act="clear-order-match" style="margin-left:10px">Match against the price list instead</button>
+      </div>` : `
       <div class="banner warn">
         Paste the invoice below, or drop in the CSV your supplier emails. Reading mailboxes
         automatically needs a mail server — see the README for what that would take.
-      </div>
+      </div>`}
 
       <div class="field-row" style="max-width:720px">
+        ${matchOrder ? '' : `
         <div class="field"><label for="inv-supplier">Supplier</label>
           <select id="inv-supplier">
             <option value="">Any supplier</option>
             ${suppliers.map((s) => `<option value="${esc(s.name)}"${
               s.name === invoiceSupplier ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}
           </select>
-          <span class="field-hint">Scopes matching to that supplier's product codes.</span></div>
+          <span class="field-hint">Scopes matching to that supplier's product codes.</span></div>`}
         <div class="field"><label for="inv-ref">Invoice number</label>
           <input id="inv-ref" value="${esc(invoiceRef)}" placeholder="e.g. INV-12345"></div>
       </div>
@@ -1191,17 +1419,117 @@
         <span class="field-hint">CSV or tab-separated. A header row helps but is not required.</span>
       </div>
       <div class="row">
-        <button class="btn primary" data-act="reconcile">Check against agreed prices</button>
+        <button class="btn primary" data-act="reconcile">${matchOrder
+          ? `Match against ${esc(matchOrder.ref)}` : 'Check against agreed prices'}</button>
         <button class="btn" data-act="load-invoice">Load a file…</button>
         <input type="file" id="invoice-file" accept=".csv,.txt,text/csv,text/plain" hidden>
         ${invoiceResult ? '<button class="btn" data-act="clear-invoice">Clear</button>' : ''}
       </div>
 
-      <div id="inv-result">${invoiceResult ? invoiceResultHtml(invoiceResult) : ''}</div>`;
+      <div id="inv-result">${invoiceResult
+        ? (invoiceOrderId ? poResultHtml(invoiceResult) : invoiceResultHtml(invoiceResult))
+        : ''}</div>`;
 
     $('#inv-text').addEventListener('input', (e) => { invoiceText = e.target.value; });
     $('#inv-ref').addEventListener('input', (e) => { invoiceRef = e.target.value; });
-    $('#inv-supplier').addEventListener('change', (e) => { invoiceSupplier = e.target.value; });
+    const supSel = $('#inv-supplier');
+    if (supSel) supSel.addEventListener('change', (e) => { invoiceSupplier = e.target.value; });
+  }
+
+  /**
+   * A PO match has more ways to be wrong than a price-list check, so the
+   * result keeps the four buckets separate: price, quantity, invoiced but
+   * never ordered, ordered but never invoiced.
+   */
+  function poResultHtml(r) {
+    const rows = r.lines.map((l) => `
+      <tr>
+        <td class="name-cell">${esc(l.ingredientName)}
+          <span class="sub-note">${esc(l.productCode || l.code || '')}</span></td>
+        <td class="num">${l.orderedQty}</td>
+        <td class="num" style="color:${l.qtyStatus !== 'ok' ? 'var(--warn)' : 'inherit'}">${l.qty}</td>
+        <td class="num">${money(l.orderedPrice)}</td>
+        <td class="num">${money(l.invoicedPrice)}</td>
+        <td class="num" style="color:${l.priceVariance > 0 ? 'var(--bad)' : l.priceVariance < 0 ? 'var(--warn)' : 'inherit'}">
+          ${l.priceVariance > 0 ? '+' : ''}${money(l.priceVarianceTotal)}</td>
+        <td class="num">
+          ${l.priceStatus === 'over' ? '<span class="pill bad">price</span>' : ''}
+          ${l.priceStatus === 'under' ? '<span class="pill warn">under</span>' : ''}
+          ${l.qtyStatus === 'short' ? '<span class="pill warn">short</span>' : ''}
+          ${l.qtyStatus === 'over' ? '<span class="pill warn">extra qty</span>' : ''}
+          ${l.priceStatus === 'ok' && l.qtyStatus === 'ok' ? '<span class="pill good">ok</span>' : ''}
+        </td>
+      </tr>`).join('');
+
+    const problems = [];
+    if (r.notInvoiced.length) {
+      problems.push(`<div class="banner warn"><strong>${r.notInvoiced.length}</strong> ordered line${
+        r.notInvoiced.length > 1 ? 's are' : ' is'} not on this invoice —
+        ${r.notInvoiced.map((l) => `${esc(l.ingredientName)} (${l.orderedQty})`).join(', ')}.
+        Short-supplied or back-ordered: chase stock, not money.</div>`);
+    }
+    if (r.notOnOrder.length) {
+      problems.push(`<div class="banner bad"><strong>${r.notOnOrder.length}</strong> invoiced line${
+        r.notOnOrder.length > 1 ? 's were' : ' was'} never on the order —
+        ${r.notOnOrder.map((l) => esc(l.ingredientName || l.description || l.code)).join(', ')}
+        (${money(r.notOnOrderTotal)}).</div>`);
+    }
+    if (r.skipped) {
+      problems.push(`<div class="banner warn">${r.skipped} row${r.skipped > 1 ? 's were' : ' was'}
+        skipped — no usable price could be read.</div>`);
+    }
+
+    const claim = poClaimEmail(r);
+
+    return `
+      <div class="section-title">Result — against ${esc(r.order.ref)}</div>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">Price credit to claim</div>
+          <div class="stat-value ${r.priceOverTotal > 0 ? 'bad' : 'good'}">${money(r.priceOverTotal)}</div>
+          <div class="stat-note">${r.priceOver.length} line${r.priceOver.length === 1 ? '' : 's'} over PO price</div></div>
+        <div class="stat"><div class="stat-label">Clean lines</div>
+          <div class="stat-value">${r.cleanCount}</div>
+          <div class="stat-note">of ${r.lines.length} matched</div></div>
+        <div class="stat"><div class="stat-label">Short-supplied</div>
+          <div class="stat-value ${r.qtyShort.length || r.notInvoiced.length ? 'warn' : 'good'}">${
+            r.qtyShort.length + r.notInvoiced.length}</div>
+          <div class="stat-note">${money(r.shortValue + r.notInvoiced.reduce((s, l) => s + l.value, 0))} of stock</div></div>
+        <div class="stat"><div class="stat-label">Never ordered</div>
+          <div class="stat-value ${r.notOnOrder.length ? 'bad' : 'good'}">${r.notOnOrder.length}</div>
+          <div class="stat-note">${money(r.notOnOrderTotal)} invoiced</div></div>
+      </div>
+
+      ${problems.join('')}
+
+      ${r.lines.length ? `<div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th class="num">Ordered</th><th class="num">Invoiced</th>
+            <th class="num">PO price</th><th class="num">Invoiced</th><th class="num">Δ line</th><th class="num"></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>` : '<div class="empty card">No invoice lines matched this order.</div>'}
+
+      ${r.clean ? `
+        <div class="banner warn" style="background:rgba(53,192,138,0.09);border-color:rgba(53,192,138,0.35);color:var(--good)">
+          Invoice matches ${esc(r.order.ref)} on price and quantity.
+          <button class="btn small" data-act="order-received" data-id="${esc(r.order.id)}" style="margin-left:10px">Mark order received</button>
+        </div>` : `
+        <div class="section-title">Reply to the supplier</div>
+        <div class="card">
+          <div class="field"><label for="claim-subject">Subject</label>
+            <input id="claim-subject" readonly value="${esc(claim.subject)}"></div>
+          <div class="field"><label for="claim-body">Message</label>
+            <textarea id="claim-body" rows="14" style="font-family:var(--mono);font-size:12.5px">${esc(claim.body)}</textarea></div>
+          <div class="row">
+            <button class="btn primary" data-act="email-claim">Open in email</button>
+            <button class="btn" data-act="copy-claim">Copy message</button>
+            <button class="btn" data-act="order-received" data-id="${esc(r.order.id)}">Mark order received anyway</button>
+          </div>
+          <p class="field-hint" style="margin-top:8px">
+            Price variances are claimed; quantity gaps are asked about — a delivery docket, not an
+            invoice, is what proves what actually arrived.
+          </p>
+        </div>`}`;
   }
 
   function invoiceResultHtml(r) {
@@ -1294,10 +1622,28 @@
     });
   }
 
+  function poClaimEmail(r) {
+    return Suppliers.orderAdjustmentEmail(r, {
+      invoiceRef,
+      business: Store.settings().business || '',
+    });
+  }
+
   function runReconcile() {
     const text = $('#inv-text').value;
     if (!text.trim()) { toast('Paste the invoice lines first.'); return; }
     invoiceText = text;
+
+    const order = invoiceOrderId ? Store.getOrder(invoiceOrderId) : null;
+    if (order) {
+      invoiceResult = Suppliers.matchInvoiceToOrder(text, order, Store.ctx());
+      $('#inv-result').innerHTML = poResultHtml(invoiceResult);
+      toast(invoiceResult.clean
+        ? `Invoice matches ${order.ref}.`
+        : `Discrepancies against ${order.ref}.`);
+      return;
+    }
+
     invoiceResult = Suppliers.reconcileInvoice(text, Store.ctx(), { supplier: invoiceSupplier });
     $('#inv-result').innerHTML = invoiceResultHtml(invoiceResult);
     const n = invoiceResult.overcharged.length;
@@ -1311,6 +1657,35 @@
     view.innerHTML = `
       <div class="view-head"><div><h2>Data</h2>
         <p>Everything is stored in this browser. Export regularly — clearing site data wipes it.</p></div></div>
+
+      <div class="section-title">Client &amp; venues</div>
+      <div class="card">
+        <div class="field" style="max-width:340px"><label for="cl-name">Client (group) name</label>
+          <input id="cl-name" value="${esc(Store.activeClient().name)}"></div>
+        <div class="section-title" style="margin-top:4px">Venues</div>
+        ${Store.venues().map((v) => `
+          <div class="line-row" style="grid-template-columns:minmax(180px,340px) auto">
+            <input data-venue-name="${esc(v.id)}" value="${esc(v.name)}" aria-label="Venue name">
+            <button class="icon-btn" data-act="del-venue" data-id="${esc(v.id)}" title="Remove venue">✕</button>
+          </div>`).join('')}
+        <button class="btn small" data-act="add-venue">+ Add venue</button>
+        <p class="field-hint" style="margin:10px 0 0">
+          Recipes, ingredients, suppliers and orders are shared across the whole group.
+          Sales volumes are recorded per venue, so the dashboard can read group-wide or one site.
+        </p>
+      </div>
+
+      <div class="section-title">Clients</div>
+      <div class="card">
+        <p class="field-hint" style="margin:0 0 10px">
+          Each client is a separate business with its own library, menu, suppliers and orders.
+          Switch clients from the selector in the header — ${Store.clients().length} on file.
+        </p>
+        <div class="row">
+          <button class="btn" data-act="add-client-btn">New client</button>
+          <button class="btn danger" data-act="del-client">Delete this client</button>
+        </div>
+      </div>
 
       <div class="section-title">Defaults for new recipes</div>
       <div class="card">
@@ -1328,8 +1703,9 @@
       <div class="section-title">Backup</div>
       <div class="card">
         <p class="field-hint" style="margin:0 0 12px">
-          ${Store.ingredients().length} ingredients · ${Store.recipes().length} recipes
-          · ${Store.suppliers().length} suppliers
+          ${esc(Store.activeClient().name)}: ${Store.ingredients().length} ingredients ·
+          ${Store.recipes().length} recipes · ${Store.suppliers().length} suppliers ·
+          ${Store.orders().length} orders. Export includes every client.
         </p>
         <div class="row">
           <button class="btn" data-act="export">Export JSON</button>
@@ -1342,10 +1718,22 @@
       <div class="card">
         <div class="row">
           <button class="btn" data-act="reset-sample">Reload sample data</button>
-          <button class="btn danger" data-act="clear-all">Delete everything</button>
+          <button class="btn danger" data-act="clear-all">Clear this client's data</button>
         </div>
         <p class="field-hint" style="margin:10px 0 0">Both replace what is currently stored. Export first.</p>
       </div>`;
+
+    $('#cl-name').addEventListener('change', (e) => {
+      Store.renameClient(Store.activeClient().id, e.target.value);
+      renderClientSwitch();
+      toast('Client renamed.');
+    });
+    $$('[data-venue-name]').forEach((el) => {
+      el.addEventListener('change', () => {
+        Store.upsertVenue({ id: el.dataset.venueName, name: el.value.trim() || 'Venue' });
+        toast('Venue renamed.');
+      });
+    });
   }
 
   function doExport() {
@@ -1377,13 +1765,36 @@
 
   // ================= routing & global actions =================
 
+  function renderClientSwitch() {
+    const sel = $('#client-select');
+    if (!sel) return;
+    const active = Store.activeClient();
+    sel.innerHTML = Store.clients().map((c) =>
+      `<option value="${esc(c.id)}"${c.id === active.id ? ' selected' : ''}>${esc(c.name)}</option>`
+    ).join('') + '<option value="__new">＋ New client…</option>';
+  }
+
+  /** Per-client view state that must not leak between clients. */
+  function resetClientState() {
+    dashVenue = '';
+    impactChanges = {};
+    invoiceOrderId = null;
+    invoiceResult = null;
+    invoiceText = '';
+    invoiceSupplier = '';
+    recipeSearch = '';
+    ingSearch = '';
+  }
+
   function render() {
+    renderClientSwitch();
     $$('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.view === currentView)));
     ({
       dashboard: renderDashboard,
       recipes: renderRecipes,
       ingredients: renderIngredients,
       suppliers: renderSuppliers,
+      orders: renderOrders,
       invoices: renderInvoices,
       data: renderData,
     }[currentView] || renderDashboard)();
@@ -1470,6 +1881,115 @@
       return;
     }
 
+    if (act === 'new-order') return openOrderEditor(null);
+    if (act === 'save-order') return saveOrder();
+
+    if (act === 'copy-order') {
+      const mail = orderEmailFor(orderDraft);
+      navigator.clipboard.writeText(`${mail.subject}\n\n${mail.body}`)
+        .then(() => toast('Order copied.'))
+        .catch(() => toast('Could not copy — check clipboard permissions.'));
+      return;
+    }
+
+    if (act === 'email-order') {
+      const supplier = Store.supplierByName(orderDraft.supplier);
+      const to = supplier && supplier.email ? supplier.email : '';
+      if (!to) toast(`No email on file for ${orderDraft.supplier} — add one under Suppliers.`);
+      const mail = orderEmailFor(orderDraft);
+      window.location.href = `mailto:${encodeURIComponent(to)}`
+        + `?subject=${encodeURIComponent(mail.subject)}&body=${encodeURIComponent(mail.body)}`;
+      return;
+    }
+
+    if (act === 'order-sent') {
+      e.stopPropagation();
+      Store.upsertOrder({ id: el.dataset.id, status: 'sent' });
+      toast('Marked sent.');
+      return render();
+    }
+
+    if (act === 'order-received') {
+      e.stopPropagation();
+      Store.upsertOrder({ id: el.dataset.id, status: 'received' });
+      if (invoiceOrderId === el.dataset.id) { invoiceOrderId = null; invoiceResult = null; }
+      toast('Order received.');
+      return render();
+    }
+
+    if (act === 'match-order') {
+      e.stopPropagation();
+      invoiceOrderId = el.dataset.id;
+      invoiceResult = null;
+      currentView = 'invoices';
+      location.hash = 'invoices';
+      return render();
+    }
+
+    if (act === 'clear-order-match') {
+      invoiceOrderId = null;
+      invoiceResult = null;
+      return renderInvoices();
+    }
+
+    if (act === 'del-order') {
+      e.stopPropagation();
+      const order = Store.getOrder(el.dataset.id);
+      if (confirm(`Delete ${order.ref}?`)) {
+        Store.deleteOrder(order.id);
+        if (invoiceOrderId === order.id) { invoiceOrderId = null; invoiceResult = null; }
+        toast('Order deleted.');
+        render();
+      }
+      return;
+    }
+
+    if (act === 'add-venue') {
+      const name = prompt('Venue name:');
+      if (name && name.trim()) {
+        Store.upsertVenue({ name: name.trim() });
+        toast('Venue added.');
+        render();
+      }
+      return;
+    }
+
+    if (act === 'del-venue') {
+      const venue = Store.getVenue(el.dataset.id);
+      try {
+        if (confirm(`Remove ${venue.name}? Sales recorded against it are removed from every recipe.`)) {
+          Store.deleteVenue(venue.id);
+          toast('Venue removed.');
+          render();
+        }
+      } catch (err) { toast(err.message); }
+      return;
+    }
+
+    if (act === 'add-client-btn') {
+      const name = prompt('Client name — the business or group this menu belongs to:');
+      if (name && name.trim()) {
+        Store.addClient(name.trim());
+        resetClientState();
+        toast(`Started ${name.trim()}.`);
+        render();
+      }
+      return;
+    }
+
+    if (act === 'del-client') {
+      const client = Store.activeClient();
+      try {
+        if (confirm(`Delete ${client.name} entirely — menu, library, suppliers and orders? This cannot be undone.`)) {
+          Store.deleteClient(client.id);
+          resetClientState();
+          toast('Client deleted.');
+          render();
+        }
+      } catch (err) { toast(err.message); }
+      return;
+    }
+
     if (act === 'reconcile') return runReconcile();
     if (act === 'load-invoice') return $('#invoice-file').click();
     if (act === 'clear-invoice') {
@@ -1486,9 +2006,10 @@
     }
 
     if (act === 'email-claim') {
-      const supplier = Store.supplierByName(invoiceSupplier)
-        || Store.supplierByName(invoiceResult && invoiceResult.overcharged[0]
-          && invoiceResult.overcharged[0].supplier);
+      const matchOrder = invoiceOrderId ? Store.getOrder(invoiceOrderId) : null;
+      const supplier = Store.supplierByName(matchOrder ? matchOrder.supplier : invoiceSupplier)
+        || Store.supplierByName(invoiceResult && invoiceResult.overcharged
+          && invoiceResult.overcharged[0] && invoiceResult.overcharged[0].supplier);
       const to = supplier && supplier.email ? supplier.email : '';
       if (!to) toast('No email on file for that supplier — add one under Suppliers.');
       const url = `mailto:${encodeURIComponent(to)}`
@@ -1511,7 +2032,7 @@
     }
 
     if (act === 'reset-sample') {
-      if (confirm('Replace everything with the sample data?')) {
+      if (confirm('Replace ALL clients with the sample data?')) {
         Store.resetToSample();
         toast('Sample data loaded.');
         render();
@@ -1520,19 +2041,38 @@
     }
 
     if (act === 'clear-all') {
-      if (confirm('Delete every ingredient and recipe? This cannot be undone.')) {
+      if (confirm(`Clear every ingredient, recipe, supplier and order for ${Store.activeClient().name}? Other clients are untouched. This cannot be undone.`)) {
         Store.clearAll();
-        toast('All data cleared.');
+        resetClientState();
+        toast('Client data cleared.');
         render();
       }
       return;
     }
 
     // Row clicks open the editor, but not when a row button was the target.
+    const orderRow = e.target.closest('[data-order]');
+    if (orderRow && !e.target.closest('button')) return openOrderEditor(orderRow.dataset.order);
     const recipeRow = e.target.closest('[data-recipe]');
     if (recipeRow && !e.target.closest('button')) return openRecipeEditor(recipeRow.dataset.recipe);
     const ingRow = e.target.closest('[data-ingredient]');
     if (ingRow && !e.target.closest('button')) return openIngredientEditor(ingRow.dataset.ingredient);
+  });
+
+  $('#client-select').addEventListener('change', (e) => {
+    if (e.target.value === '__new') {
+      const name = prompt('Client name — the business or group this menu belongs to:');
+      if (name && name.trim()) {
+        Store.addClient(name.trim());
+        resetClientState();
+        toast(`Started ${name.trim()}. It begins empty — add ingredients or import a backup.`);
+      }
+      render(); // also resets the select if the prompt was cancelled
+      return;
+    }
+    Store.setActiveClient(e.target.value);
+    resetClientState();
+    render();
   });
 
   document.addEventListener('change', (e) => {
@@ -1549,6 +2089,6 @@
   });
 
   const hash = location.hash.replace('#', '');
-  if (['dashboard', 'recipes', 'ingredients', 'suppliers', 'invoices', 'data'].includes(hash)) currentView = hash;
+  if (['dashboard', 'recipes', 'ingredients', 'suppliers', 'orders', 'invoices', 'data'].includes(hash)) currentView = hash;
   render();
 })();

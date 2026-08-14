@@ -482,9 +482,238 @@ const Suppliers = (() => {
     };
   }
 
+  // ------------------------------------------------------- purchase orders
+
+  /** Order value at the prices locked when the order was raised. */
+  function orderTotal(order) {
+    return round((order.lines || []).reduce(
+      (sum, l) => sum + (Number(l.qty) || 0) * (Number(l.packPrice) || 0), 0), 2);
+  }
+
+  /**
+   * The purchase order as an email a supplier's sales desk can key straight
+   * in: code, product, packs, the agreed price, and where to deliver.
+   */
+  function orderEmail(order, ctx, options = {}) {
+    const money = (n) => `$${Number(n).toFixed(2)}`;
+    const pad = (s, n) => String(s).padEnd(n);
+    const lines = (order.lines || []).map((l) => {
+      const ing = ctx.ingredients.find((i) => i.id === l.ingredientId);
+      const offer = ing && ((ing.offers || []).find((o) => o.id === l.offerId) || C.activeOffer(ing));
+      return `  ${pad(offer && offer.productCode ? offer.productCode : '-', 14)}`
+        + `${pad(ing ? ing.name : '(unknown item)', 34)}`
+        + `${pad(`${l.qty} pack${Number(l.qty) === 1 ? '' : 's'}`, 12)}`
+        + `@ ${money(l.packPrice)}  =  ${money((Number(l.qty) || 0) * (Number(l.packPrice) || 0))}`;
+    });
+
+    const body = [
+      `Please supply the following against purchase order ${order.ref}:`,
+      '',
+      ...lines,
+      '',
+      `Order total: ${money(orderTotal(order))} (at our agreed pricing)`,
+      options.venueName ? `Deliver to: ${options.venueName}` : null,
+      '',
+      'Please reference the PO number on the delivery docket and invoice.',
+      '',
+      'Thanks,',
+      options.business || '',
+    ].filter((l) => l !== null).join('\n').replace(/\n{3,}/g, '\n\n');
+
+    return { subject: `Purchase order ${order.ref}${options.business ? ` — ${options.business}` : ''}`, body };
+  }
+
+  /**
+   * Match a supplier invoice against the purchase order it should be billing.
+   *
+   * This is a harder check than the price-list one: the PO says what was
+   * ordered, in what quantity, at what price. The invoice has to agree on all
+   * three. Four things can be wrong, and each is reported in its own bucket:
+   *
+   *   price     invoiced above (or below) the price locked on the PO
+   *   quantity  invoiced more or fewer packs than were ordered
+   *   notOnOrder   invoiced lines the PO never asked for
+   *   notInvoiced  ordered lines the invoice doesn't bill — short-supplied
+   *                or back-ordered; chase stock, not money
+   *
+   * Money is only claimed for price variances and not-ordered lines; quantity
+   * gaps are supply questions until a delivery docket says otherwise, so the
+   * claim email asks rather than asserts.
+   */
+  function matchInvoiceToOrder(text, order, ctx, options = {}) {
+    const tolerance = options.tolerance == null ? 0.005 : Number(options.tolerance);
+    const { lines, skipped } = parseInvoice(text);
+    const index = offerIndex(ctx.ingredients);
+
+    const poLines = (order.lines || []).map((l) => {
+      const ingredient = ctx.ingredients.find((i) => i.id === l.ingredientId) || null;
+      const offer = ingredient
+        ? ((ingredient.offers || []).find((o) => o.id === l.offerId) || C.activeOffer(ingredient))
+        : null;
+      return { ...l, ingredient, offer, matched: false };
+    });
+
+    const checked = [];
+    const notOnOrder = [];
+
+    for (const line of lines) {
+      const hit = findOffer(line, index, order.supplier);
+      const po = hit && poLines.find((p) => !p.matched && p.ingredient && p.ingredient.id === hit.ingredient.id);
+      if (!po) {
+        notOnOrder.push({
+          ...line,
+          ingredientName: hit ? hit.ingredient.name : null,
+          value: round((Number(line.qty) > 0 ? Number(line.qty) : 1) * Number(line.unitPrice), 2),
+        });
+        continue;
+      }
+      po.matched = true;
+
+      const invoiced = Number(line.unitPrice);
+      const qty = Number(line.qty) > 0 ? Number(line.qty) : 1;
+      const priceVariance = invoiced - Number(po.packPrice);
+      const qtyVariance = qty - Number(po.qty);
+
+      checked.push({
+        ...line,
+        qty,
+        ingredientId: po.ingredient.id,
+        ingredientName: po.ingredient.name,
+        productCode: (po.offer && po.offer.productCode) || '',
+        orderedQty: Number(po.qty),
+        orderedPrice: round(Number(po.packPrice), 2),
+        invoicedPrice: round(invoiced, 2),
+        priceVariance: round(priceVariance, 2),
+        priceVarianceTotal: round(priceVariance * qty, 2),
+        qtyVariance: round(qtyVariance, 3),
+        qtyVarianceValue: round(qtyVariance * Number(po.packPrice), 2),
+        priceStatus: Math.abs(priceVariance) <= tolerance ? 'ok' : priceVariance > 0 ? 'over' : 'under',
+        qtyStatus: Math.abs(qtyVariance) < 1e-9 ? 'ok' : qtyVariance > 0 ? 'over' : 'short',
+      });
+    }
+
+    const notInvoiced = poLines.filter((p) => !p.matched).map((p) => ({
+      ingredientName: p.ingredient ? p.ingredient.name : '(item no longer exists)',
+      productCode: (p.offer && p.offer.productCode) || '',
+      orderedQty: Number(p.qty),
+      orderedPrice: round(Number(p.packPrice), 2),
+      value: round(Number(p.qty) * Number(p.packPrice), 2),
+    }));
+
+    const priceOver = checked.filter((l) => l.priceStatus === 'over');
+    const qtyShort = checked.filter((l) => l.qtyStatus === 'short');
+    const qtyOver = checked.filter((l) => l.qtyStatus === 'over');
+
+    return {
+      order,
+      lines: checked,
+      priceOver,
+      qtyShort,
+      qtyOver,
+      notOnOrder,
+      notInvoiced,
+      skipped,
+      priceOverTotal: round(priceOver.reduce((s, l) => s + l.priceVarianceTotal, 0), 2),
+      notOnOrderTotal: round(notOnOrder.reduce((s, l) => s + l.value, 0), 2),
+      shortValue: round(qtyShort.reduce((s, l) => s + Math.abs(l.qtyVarianceValue), 0), 2),
+      cleanCount: checked.filter((l) => l.priceStatus === 'ok' && l.qtyStatus === 'ok').length,
+      clean: !priceOver.length && !qtyShort.length && !qtyOver.length
+        && !notOnOrder.length && !notInvoiced.length
+        && checked.every((l) => l.priceStatus !== 'under'),
+    };
+  }
+
+  /**
+   * The reply when an invoice doesn't match its PO. Price variances and
+   * not-ordered lines are money; quantity gaps are questions. Written to
+   * survive being forwarded to a supplier's accounts department.
+   */
+  function orderAdjustmentEmail(result, options = {}) {
+    const money = (n) => `$${Number(n).toFixed(2)}`;
+    const pad = (s, n) => String(s).padEnd(n);
+    const ref = options.invoiceRef ? ` ${options.invoiceRef}` : '';
+    const po = result.order.ref;
+
+    if (result.clean) {
+      return {
+        subject: `Invoice${ref} matched to ${po}`,
+        body: `Invoice${ref} matches purchase order ${po} on price and quantity for all `
+          + `${result.cleanCount} lines. No adjustment required.`,
+        empty: true,
+      };
+    }
+
+    const sections = [];
+
+    if (result.priceOver.length) {
+      sections.push(
+        `Priced above the order (credit requested — ${money(result.priceOverTotal)}):`,
+        ...result.priceOver.map((l) =>
+          `  ${pad(l.productCode || l.code || '-', 14)}${pad(l.ingredientName, 34)}`
+          + `qty ${pad(l.qty, 6)}PO ${pad(money(l.orderedPrice), 10)}`
+          + `invoiced ${pad(money(l.invoicedPrice), 10)}variance ${money(l.priceVarianceTotal)}`),
+        '');
+    }
+
+    if (result.notOnOrder.length) {
+      sections.push(
+        `On the invoice but not on our order (please confirm or credit — ${money(result.notOnOrderTotal)}):`,
+        ...result.notOnOrder.map((l) =>
+          `  ${pad(l.code || '-', 14)}${l.ingredientName || l.description || '(unrecognised)'}`
+          + ` — ${money(l.value)}`),
+        '');
+    }
+
+    if (result.qtyShort.length) {
+      sections.push(
+        'Invoiced below the ordered quantity — please advise delivery or back-order:',
+        ...result.qtyShort.map((l) =>
+          `  ${pad(l.productCode || '-', 14)}${pad(l.ingredientName, 34)}`
+          + `ordered ${l.orderedQty}, invoiced ${l.qty}`),
+        '');
+    }
+
+    if (result.qtyOver.length) {
+      sections.push(
+        'Invoiced above the ordered quantity — please confirm delivery:',
+        ...result.qtyOver.map((l) =>
+          `  ${pad(l.productCode || '-', 14)}${pad(l.ingredientName, 34)}`
+          + `ordered ${l.orderedQty}, invoiced ${l.qty}`),
+        '');
+    }
+
+    if (result.notInvoiced.length) {
+      sections.push(
+        'On our order but not on this invoice — please advise if back-ordered:',
+        ...result.notInvoiced.map((l) =>
+          `  ${pad(l.productCode || '-', 14)}${pad(l.ingredientName, 34)}ordered ${l.orderedQty}`),
+        '');
+    }
+
+    const claimTotal = round(result.priceOverTotal, 2);
+    const body = [
+      `Invoice${ref} has been checked against purchase order ${po} and does not match.`,
+      '',
+      ...sections,
+      claimTotal > 0 ? `Credit requested for price variances: ${money(claimTotal)}` : null,
+      '',
+      'Could you please issue the credit and confirm the items queried above.',
+      '',
+      'Thanks,',
+      options.business || '',
+    ].filter((l) => l !== null).join('\n').replace(/\n{3,}/g, '\n\n');
+
+    return {
+      subject: `${po} / invoice${ref} — discrepancies${claimTotal > 0 ? ` (${money(claimTotal)})` : ''}`,
+      body,
+      empty: false,
+    };
+  }
+
   return {
     normaliseOffer, compareOffers, switchImpact,
     parseInvoice, reconcileInvoice, adjustmentEmail, offerIndex,
+    orderTotal, orderEmail, matchInvoiceToOrder, orderAdjustmentEmail,
   };
 })();
 

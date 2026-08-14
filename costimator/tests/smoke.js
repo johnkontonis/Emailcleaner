@@ -67,6 +67,19 @@ const shot = async (page, name) => {
   check('sample menu costs with no errors',
     (await page.locator('tbody .sub-note').count()) === 0,
     await page.locator('tbody .sub-note').first().textContent().catch(() => ''));
+  check('the client switcher shows the sample group',
+    (await page.locator('#client-select').inputValue()) === 'cli-sample');
+
+  const revAll = await page.locator('.stat-value').nth(1).textContent();
+  await page.selectOption('#dash-venue', 'ven-flem');
+  await page.waitForTimeout(250);
+  const revFlem = await page.locator('.stat-value').nth(1).textContent();
+  check('the venue filter narrows revenue to one site',
+    parseFloat(revFlem.replace(/[$,]/g, '')) < parseFloat(revAll.replace(/[$,]/g, '')),
+    `${revAll} -> ${revFlem}`);
+  await shot(page, '11-dashboard-venue.png');
+  await page.selectOption('#dash-venue', '');
+  await page.waitForTimeout(250);
   await shot(page, '01-dashboard.png');
 
   // ---- recipes ----
@@ -89,6 +102,9 @@ const shot = async (page, name) => {
   check('editor shows all recipe lines', (await page.locator('.line-row').count()) === 6,
     `${await page.locator('.line-row').count()} lines`);
   check('no line errors on the sample recipe', (await page.locator('.line-error').count()) === 0);
+  check('sales are recorded per venue',
+    (await page.locator('[data-vsales]').count()) === 2,
+    `${await page.locator('[data-vsales]').count()} inputs`);
 
   // ---- bought-in alternative / make-or-buy ----
   check('the schnitzel line offers a bought-in alternative',
@@ -272,6 +288,82 @@ const shot = async (page, name) => {
   await page.waitForTimeout(300);
   check('an unrecognised line is reported',
     (await page.locator('#inv-result .banner.warn').first().textContent()).includes('could not be matched'));
+
+  // ---- purchase orders ----
+  await page.click('.tab[data-view="orders"]');
+  await page.waitForSelector('tr[data-order]');
+  check('the sample PO is listed', (await page.locator('tr[data-order]').count()) === 1);
+  check('the PO totals at the agreed prices',
+    (await page.locator('tr[data-order] td').nth(4).textContent()).includes('554.00'),
+    await page.locator('tr[data-order] td').nth(4).textContent());
+
+  await page.click('[data-act="match-order"]');
+  await page.waitForSelector('#inv-text');
+  check('matching mode names the PO',
+    (await page.locator('.banner').first().textContent()).includes('PO-0001'));
+
+  // Schnitzel priced over the PO, tenders one pack short, kiev clean.
+  await page.fill('#inv-ref', 'INV-7401');
+  await page.fill('#inv-text',
+    'Product Code,Qty,Unit Price\nGT-SCH-300,4,99.50\nGT-TEN-5K,1,41.00\nGT-KIE-200,1,88.00');
+  await page.click('[data-act="reconcile"]');
+  await page.waitForSelector('#inv-result .stat-value');
+  const poStats = await page.locator('#inv-result .stat-value').allTextContents();
+  check('the price credit is against the PO price', poStats[0] === '$14.00', poStats.join(' | '));
+  check('the short-supplied line is counted', poStats[2] === '1', poStats.join(' | '));
+
+  const poSubject = await page.inputValue('#claim-subject');
+  check('the claim names PO and invoice',
+    poSubject.includes('PO-0001') && poSubject.includes('INV-7401'), poSubject);
+  const poBody = await page.inputValue('#claim-body');
+  check('the claim asks about the short line, not claims it',
+    poBody.includes('below the ordered quantity'));
+  await shot(page, '10-po-match.png');
+
+  // A correct invoice matches clean and can close the order.
+  await page.fill('#inv-text',
+    'Product Code,Qty,Unit Price\nGT-SCH-300,4,96.00\nGT-TEN-5K,2,41.00\nGT-KIE-200,1,88.00');
+  await page.click('[data-act="reconcile"]');
+  await page.waitForTimeout(300);
+  check('a clean invoice offers to receive the order',
+    (await page.locator('[data-act="order-received"]').count()) >= 1);
+  await page.click('[data-act="order-received"]');
+  await page.waitForTimeout(300);
+  await page.click('.tab[data-view="orders"]');
+  await page.waitForSelector('tr[data-order]');
+  check('the received order shows its status',
+    (await page.locator('tr[data-order] .pill').first().textContent()) === 'received');
+
+  // Raise a fresh order — lines price themselves from the agreed price.
+  await page.click('[data-act="new-order"]');
+  await page.waitForSelector('#order-editor');
+  await page.click('[data-act="add-oline"]');
+  await page.waitForTimeout(200);
+  check('a new order line is priced from the agreed price',
+    (await page.locator('#order-editor .line-cost').first().textContent()).includes('$'));
+  await page.click('[data-act="save-order"]');
+  await page.waitForTimeout(300);
+  check('the new order takes the next PO number',
+    (await page.locator('tr[data-order]').count()) === 2);
+  await shot(page, '12-orders.png');
+
+  // ---- clients are isolated ----
+  page.once('dialog', (d) => d.accept('Crafty Chooks'));
+  await page.selectOption('#client-select', '__new');
+  await page.waitForTimeout(400);
+  await page.click('.tab[data-view="ingredients"]');
+  await page.waitForTimeout(250);
+  check('a new client starts with an empty library',
+    (await page.locator('tr[data-ingredient]').count()) === 0,
+    `${await page.locator('tr[data-ingredient]').count()} rows`);
+
+  await page.selectOption('#client-select', 'cli-sample');
+  await page.waitForTimeout(300);
+  await page.click('.tab[data-view="ingredients"]');
+  await page.waitForTimeout(250);
+  check('switching back restores the group library',
+    (await page.locator('tr[data-ingredient]').count()) >= 20,
+    `${await page.locator('tr[data-ingredient]').count()} rows`);
 
   // ---- persistence ----
   await page.click('.tab[data-view="recipes"]');

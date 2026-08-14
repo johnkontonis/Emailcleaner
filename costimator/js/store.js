@@ -1,9 +1,17 @@
 // Persistence. Everything lives in localStorage — the whole app is a static
 // page, so your costings never leave the machine. Export/import is the backup
 // story, and the seam below is where a real API would slot in later.
+//
+// Shape (v2): the store holds CLIENTS. A client is one business group — its
+// ingredient library, recipes, suppliers and purchase orders are shared across
+// the whole group, because a group costs one menu, not one menu per site. What
+// differs by site is sales: each client has VENUES, and a recipe's volumes are
+// recorded per venue. Every accessor below reads through the active client, so
+// the rest of the app never has to know about any client but the current one.
 
 const Store = (() => {
-  const KEY = 'costimator:v1';
+  const KEY = 'costimator:v2';
+  const LEGACY_KEY = 'costimator:v1';
 
   const uid = (prefix) =>
     `${prefix}-${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
@@ -56,11 +64,13 @@ const Store = (() => {
       { id: 'ing-mayo', name: 'Whole egg mayonnaise', category: 'Wet goods', supplier: 'Bidfood', packSize: 3, packUnit: 'l', packPrice: 19.5, yieldPct: 100, density: 0.94 },
     ];
 
+    // Sales are per venue: the menu is costed once for the group, but each
+    // site sells different volumes of it.
     const recipes = [
       {
         id: 'rec-crumbmix', name: 'Seasoned crumb mix', type: 'sub', onMenu: false,
         batchYieldQty: 5, batchYieldUnit: 'kg', portions: 1, wastagePct: 0,
-        sellPrice: 0, taxRate: 10, targetGpPct: 70, unitsSold: 0,
+        sellPrice: 0, taxRate: 10, targetGpPct: 70, salesByVenue: {},
         method: 'Combine dry, mix through until evenly coloured. Store sealed, use within 7 days.',
         lines: [
           { kind: 'ingredient', refId: 'ing-crumb', qty: 4, unit: 'kg' },
@@ -75,7 +85,7 @@ const Store = (() => {
         // switched between crumbing it here and buying G&T's premade.
         id: 'rec-house-schnitzel', name: 'House crumbed schnitzel', type: 'sub', onMenu: false,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
-        sellPrice: 0, taxRate: 10, targetGpPct: 70, unitsSold: 0,
+        sellPrice: 0, taxRate: 10, targetGpPct: 70, salesByVenue: {},
         method: 'Flatten breast to 10mm, flour, egg wash, crumb. Rest 20 min before service.',
         lines: [
           { kind: 'ingredient', refId: 'ing-breast', qty: 220, unit: 'g' },
@@ -86,7 +96,8 @@ const Store = (() => {
       {
         id: 'rec-schnitzel', name: 'Chicken schnitzel', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 3,
-        sellPrice: 26.0, taxRate: 10, targetGpPct: 70, unitsSold: 180,
+        sellPrice: 26.0, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 110, 'ven-kens': 70 },
         method: 'Fry 4 min each side. Serve with chips and lemon.',
         lines: [
           // Made here by default; flip useAlt to cost it on G&T's premade
@@ -102,7 +113,8 @@ const Store = (() => {
       {
         id: 'rec-parma', name: 'Chicken parmigiana', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 3,
-        sellPrice: 29.5, taxRate: 10, targetGpPct: 70, unitsSold: 380,
+        sellPrice: 29.5, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 240, 'ven-kens': 140 },
         method: 'Cook schnitzel, top with napoli, ham and mozzarella. Grill to melt.',
         lines: [
           {
@@ -119,7 +131,8 @@ const Store = (() => {
       {
         id: 'rec-burger', name: 'Crispy chicken burger', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
-        sellPrice: 22.0, taxRate: 10, targetGpPct: 70, unitsSold: 310,
+        sellPrice: 22.0, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 190, 'ven-kens': 120 },
         method: 'Crumb thigh fillet, fry. Build on toasted bun with mayo, lettuce, tomato.',
         lines: [
           { kind: 'ingredient', refId: 'ing-thigh', qty: 180, unit: 'g' },
@@ -136,7 +149,8 @@ const Store = (() => {
       {
         id: 'rec-roast', name: 'Half roast chicken', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 4,
-        sellPrice: 27.0, taxRate: 10, targetGpPct: 70, unitsSold: 95,
+        sellPrice: 27.0, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 60, 'ven-kens': 35 },
         method: 'Season, roast 45 min at 190C, rest 10 min, halve.',
         lines: [
           { kind: 'ingredient', refId: 'ing-wholebird', qty: 700, unit: 'g' },
@@ -151,7 +165,8 @@ const Store = (() => {
         // supplier comparison on that item worth running.
         id: 'rec-schnitzelroll', name: 'Schnitzel roll', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
-        sellPrice: 18.5, taxRate: 10, targetGpPct: 70, unitsSold: 260,
+        sellPrice: 18.5, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 160, 'ven-kens': 100 },
         method: 'Fry from frozen, build on a toasted bun with slaw and aioli.',
         lines: [
           { kind: 'ingredient', refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' },
@@ -165,7 +180,8 @@ const Store = (() => {
         // "where does the saving actually land?" answerable.
         id: 'rec-kids-schnitty', name: 'Kids schnitzel', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
-        sellPrice: 12.0, taxRate: 10, targetGpPct: 70, unitsSold: 45,
+        sellPrice: 12.0, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 25, 'ven-kens': 20 },
         method: 'Fry from frozen, halve, serve with chips.',
         lines: [
           { kind: 'ingredient', refId: 'ing-gt-schnitzel', qty: 1, unit: 'ea' },
@@ -176,7 +192,8 @@ const Store = (() => {
         // Nothing is made here — the dish is the supplier's product plus chips.
         id: 'rec-tenders', name: 'Chicken tenders & chips', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
-        sellPrice: 19.5, taxRate: 10, targetGpPct: 70, unitsSold: 145,
+        sellPrice: 19.5, taxRate: 10, targetGpPct: 70,
+        salesByVenue: { 'ven-flem': 90, 'ven-kens': 55 },
         method: 'Fry from frozen, 4 min at 180C. Serve with chips and aioli.',
         lines: [
           { kind: 'ingredient', refId: 'ing-gt-tenders', qty: 200, unit: 'g' },
@@ -187,7 +204,8 @@ const Store = (() => {
       {
         id: 'rec-chips', name: 'Bowl of chips', type: 'menu', onMenu: true,
         batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 2,
-        sellPrice: 10.0, taxRate: 10, targetGpPct: 75, unitsSold: 420,
+        sellPrice: 10.0, taxRate: 10, targetGpPct: 75,
+        salesByVenue: { 'ven-flem': 260, 'ven-kens': 160 },
         method: 'Fry 3.5 min at 180C, salt immediately.',
         lines: [
           { kind: 'ingredient', refId: 'ing-potato', qty: 250, unit: 'g' },
@@ -204,29 +222,69 @@ const Store = (() => {
       { id: 'sup-mkt', name: 'Market', email: '' },
     ];
 
-    return { ingredients, recipes, suppliers, settings: defaultSettings() };
+    // A sent order waiting on its invoice, so PO matching has something to
+    // demonstrate on first open.
+    const orders = [
+      {
+        id: 'ord-sample', ref: 'PO-0001', supplier: 'G&T Chickens',
+        venueId: 'ven-flem', status: 'sent', createdAt: '2026-08-12',
+        lines: [
+          { ingredientId: 'ing-gt-schnitzel', offerId: 'off-gt-sch', qty: 4, packPrice: 96.0 },
+          { ingredientId: 'ing-gt-tenders', offerId: null, qty: 2, packPrice: 41.0 },
+          { ingredientId: 'ing-gt-kiev', offerId: null, qty: 1, packPrice: 88.0 },
+        ],
+      },
+    ];
+
+    return {
+      activeClientId: 'cli-sample',
+      clients: [{
+        id: 'cli-sample',
+        name: 'The Local Hotel Group',
+        venues: [
+          { id: 'ven-flem', name: 'Flemington' },
+          { id: 'ven-kens', name: 'Kensington' },
+        ],
+        ingredients, recipes, suppliers, orders,
+        settings: { ...defaultSettings(), business: 'The Local Hotel Group' },
+      }],
+    };
   }
 
   function defaultSettings() {
     return { taxRate: 10, targetGpPct: 70, currency: '$', business: '', priceTolerance: 0.005 };
   }
 
-  function emptyState() {
-    return { ingredients: [], recipes: [], suppliers: [], settings: defaultSettings() };
+  function newClient(name) {
+    return {
+      id: uid('cli'),
+      name: name || 'New client',
+      venues: [{ id: uid('ven'), name: 'Main venue' }],
+      ingredients: [], recipes: [], suppliers: [], orders: [],
+      settings: { ...defaultSettings(), business: name || '' },
+    };
   }
 
   /**
-   * Bring stored data up to the current shape.
+   * Bring one client's data up to the current shape. Idempotent — runs on
+   * every load.
    *
-   * Pack size and price used to live on the ingredient itself. They now live on
-   * a supplier offer, so more than one supplier can compete for the same item.
-   * Anything still in the old shape is folded into a single offer here, so no
-   * price ever needs re-entering. Idempotent — safe to run on every load.
+   * - Pack size and price used to live on the ingredient; they now live on a
+   *   supplier offer, so more than one supplier can compete for the same item.
+   * - A flat `unitsSold` becomes per-venue sales, attributed to the client's
+   *   first venue — the only defensible guess for a business that was a single
+   *   site until now.
    */
-  function migrate(state) {
+  function migrateClient(client) {
     let changed = false;
 
-    for (const ing of state.ingredients || []) {
+    if (!Array.isArray(client.venues) || !client.venues.length) {
+      client.venues = [{ id: uid('ven'), name: 'Main venue' }];
+      changed = true;
+    }
+    if (!Array.isArray(client.orders)) { client.orders = []; changed = true; }
+
+    for (const ing of client.ingredients || []) {
       if (!Array.isArray(ing.offers) || !ing.offers.length) {
         const offer = {
           id: uid('off'),
@@ -259,21 +317,67 @@ const Store = (() => {
       }
     }
 
+    for (const rec of client.recipes || []) {
+      if (rec.salesByVenue == null) {
+        const sold = Number(rec.unitsSold) || 0;
+        rec.salesByVenue = sold > 0 ? { [client.venues[0].id]: sold } : {};
+        delete rec.unitsSold;
+        changed = true;
+      }
+    }
+
     // Every supplier named on an offer should have a record to hang an email
-    // address off, so invoices can be answered.
-    if (!Array.isArray(state.suppliers)) { state.suppliers = []; changed = true; }
-    const known = new Set(state.suppliers.map((s) => s.name.toLowerCase()));
-    for (const ing of state.ingredients || []) {
+    // address off, so invoices and orders can be sent.
+    if (!Array.isArray(client.suppliers)) { client.suppliers = []; changed = true; }
+    const known = new Set(client.suppliers.map((s) => s.name.toLowerCase()));
+    for (const ing of client.ingredients || []) {
       for (const o of ing.offers || []) {
         const name = (o.supplier || '').trim();
         if (name && !known.has(name.toLowerCase())) {
-          state.suppliers.push({ id: uid('sup'), name, email: '' });
+          client.suppliers.push({ id: uid('sup'), name, email: '' });
           known.add(name.toLowerCase());
           changed = true;
         }
       }
     }
 
+    client.settings = { ...defaultSettings(), ...(client.settings || {}) };
+    return changed;
+  }
+
+  /** Top-level shape: a v1 single-business dataset becomes one client. */
+  function migrate(st) {
+    let changed = false;
+
+    if (!Array.isArray(st.clients)) {
+      const client = {
+        id: uid('cli'),
+        name: (st.settings && st.settings.business) || 'My business',
+        venues: [],
+        ingredients: st.ingredients || [],
+        recipes: st.recipes || [],
+        suppliers: st.suppliers || [],
+        orders: [],
+        settings: st.settings || defaultSettings(),
+      };
+      st.clients = [client];
+      st.activeClientId = client.id;
+      delete st.ingredients; delete st.recipes; delete st.suppliers; delete st.settings;
+      changed = true;
+    }
+
+    if (!st.clients.length) {
+      st.clients.push(newClient('My business'));
+      changed = true;
+    }
+    for (const c of st.clients) {
+      if (!c.id) { c.id = uid('cli'); changed = true; }
+      if (migrateClient(c)) changed = true;
+    }
+    if (!st.activeClientId || !st.clients.some((c) => c.id === st.activeClientId)) {
+      st.activeClientId = st.clients[0].id;
+      changed = true;
+    }
     return changed;
   }
 
@@ -283,14 +387,18 @@ const Store = (() => {
     if (state) return state;
     try {
       const raw = localStorage.getItem(KEY);
-      state = raw ? JSON.parse(raw) : seed();
+      if (raw) {
+        state = JSON.parse(raw);
+      } else {
+        // First run on v2: pick up a v1 dataset if one exists rather than
+        // dropping the user back to sample data.
+        const legacy = localStorage.getItem(LEGACY_KEY);
+        state = legacy ? JSON.parse(legacy) : seed();
+      }
     } catch (err) {
       console.warn('Could not read saved data, starting from the sample set.', err);
       state = seed();
     }
-    state.settings = { ...defaultSettings(), ...(state.settings || {}) };
-    state.ingredients = state.ingredients || [];
-    state.recipes = state.recipes || [];
     if (migrate(state)) save();
     return state;
   }
@@ -305,11 +413,100 @@ const Store = (() => {
     return true;
   }
 
-  const ingredients = () => load().ingredients;
-  const recipes = () => load().recipes;
-  const suppliers = () => load().suppliers;
-  const settings = () => load().settings;
+  // ---- clients & venues ----
+
+  function clients() { return load().clients; }
+
+  function activeClient() {
+    const st = load();
+    return st.clients.find((c) => c.id === st.activeClientId) || st.clients[0];
+  }
+
+  function setActiveClient(id) {
+    const st = load();
+    if (st.clients.some((c) => c.id === id)) {
+      st.activeClientId = id;
+      save();
+    }
+    return activeClient();
+  }
+
+  function addClient(name) {
+    const client = newClient(name);
+    load().clients.push(client);
+    load().activeClientId = client.id;
+    save();
+    return client;
+  }
+
+  function renameClient(id, name) {
+    const client = clients().find((c) => c.id === id);
+    if (client && name.trim()) { client.name = name.trim(); save(); }
+  }
+
+  function deleteClient(id) {
+    const st = load();
+    if (st.clients.length <= 1) throw new Error('At least one client is required.');
+    st.clients = st.clients.filter((c) => c.id !== id);
+    if (st.activeClientId === id) st.activeClientId = st.clients[0].id;
+    save();
+  }
+
+  function venues() { return activeClient().venues; }
+
+  function getVenue(id) { return venues().find((v) => v.id === id) || null; }
+
+  function upsertVenue(data) {
+    const list = venues();
+    if (data.id) {
+      const idx = list.findIndex((v) => v.id === data.id);
+      if (idx >= 0) { list[idx] = { ...list[idx], ...data }; save(); return list[idx]; }
+    }
+    const created = { id: uid('ven'), name: 'New venue', ...data };
+    list.push(created);
+    save();
+    return created;
+  }
+
+  function deleteVenue(id) {
+    const list = venues();
+    if (list.length <= 1) throw new Error('A client needs at least one venue.');
+    const idx = list.findIndex((v) => v.id === id);
+    if (idx < 0) return;
+    list.splice(idx, 1);
+    // Sales recorded against the removed venue go with it — the caller is
+    // expected to have warned about that.
+    for (const rec of recipes()) {
+      if (rec.salesByVenue && rec.salesByVenue[id] != null) delete rec.salesByVenue[id];
+    }
+    save();
+  }
+
+  // ---- per-client accessors (everything below reads the active client) ----
+
+  const ingredients = () => activeClient().ingredients;
+  const recipes = () => activeClient().recipes;
+  const suppliers = () => activeClient().suppliers;
+  const settings = () => activeClient().settings;
   const ctx = () => ({ ingredients: ingredients(), recipes: recipes() });
+
+  /**
+   * Recipes with `unitsSold` resolved from per-venue sales — the whole group
+   * when venueId is null, one site otherwise. The costing engine only ever
+   * sees the resolved number.
+   */
+  function recipesWithSales(venueId = null) {
+    return recipes().map((r) => {
+      const sales = r.salesByVenue || {};
+      const unitsSold = venueId != null
+        ? Number(sales[venueId]) || 0
+        : Object.values(sales).reduce((sum, n) => sum + (Number(n) || 0), 0);
+      return { ...r, unitsSold };
+    });
+  }
+
+  const salesCtx = (venueId = null) =>
+    ({ ingredients: ingredients(), recipes: recipesWithSales(venueId) });
 
   // ---- suppliers ----
 
@@ -381,6 +578,50 @@ const Store = (() => {
     save();
   }
 
+  // ---- purchase orders ----
+
+  function orders() { return activeClient().orders; }
+
+  function getOrder(id) { return orders().find((o) => o.id === id) || null; }
+
+  /** PO-0001, PO-0002… per client, counting from the highest existing ref. */
+  function nextOrderRef() {
+    const max = orders().reduce((best, o) => {
+      const m = /^PO-(\d+)$/.exec(o.ref || '');
+      return m ? Math.max(best, Number(m[1])) : best;
+    }, 0);
+    return `PO-${String(max + 1).padStart(4, '0')}`;
+  }
+
+  function upsertOrder(data) {
+    const list = orders();
+    if (data.id) {
+      const idx = list.findIndex((o) => o.id === data.id);
+      if (idx >= 0) { list[idx] = { ...list[idx], ...data }; save(); return list[idx]; }
+    }
+    const created = {
+      id: uid('ord'),
+      ref: nextOrderRef(),
+      supplier: '',
+      venueId: venues()[0].id,
+      status: 'draft',
+      createdAt: new Date().toISOString().slice(0, 10),
+      lines: [],
+      ...data,
+    };
+    list.push(created);
+    save();
+    return created;
+  }
+
+  function deleteOrder(id) {
+    const list = orders();
+    const idx = list.findIndex((o) => o.id === id);
+    if (idx >= 0) { list.splice(idx, 1); save(); }
+  }
+
+  // ---- ingredients & recipes ----
+
   function getIngredient(id) { return ingredients().find((i) => i.id === id) || null; }
   function getRecipe(id) { return recipes().find((r) => r.id === id) || null; }
 
@@ -392,9 +633,9 @@ const Store = (() => {
     }
     const created = { id: uid('ing'), yieldPct: 100, ...data };
     list.push(created);
-    // A brand new ingredient arrives in the flat shape from the editor; fold it
-    // into an offer the same way stored data is folded.
-    migrate({ ingredients: [created], suppliers: load().suppliers });
+    // A brand new ingredient may arrive in the flat shape from an import; fold
+    // it into an offer the same way stored data is folded.
+    migrateClient(activeClient());
     save();
     return created;
   }
@@ -409,7 +650,8 @@ const Store = (() => {
     const created = {
       id: uid('rec'), type: 'menu', onMenu: true, lines: [],
       batchYieldQty: 1, batchYieldUnit: 'ea', portions: 1, wastagePct: 0,
-      sellPrice: 0, taxRate: s.taxRate, targetGpPct: s.targetGpPct, unitsSold: 0, method: '',
+      sellPrice: 0, taxRate: s.taxRate, targetGpPct: s.targetGpPct,
+      salesByVenue: {}, method: '',
       ...data,
     };
     list.push(created);
@@ -453,36 +695,58 @@ const Store = (() => {
   }
 
   function updateSettings(patch) {
-    Object.assign(load().settings, patch);
+    Object.assign(activeClient().settings, patch);
     save();
   }
 
+  // ---- backup ----
+
   function exportJson() {
-    return JSON.stringify({ ...load(), exportedAt: new Date().toISOString(), version: 1 }, null, 2);
+    return JSON.stringify({ ...load(), exportedAt: new Date().toISOString(), version: 2 }, null, 2);
   }
 
   function importJson(text) {
     const parsed = JSON.parse(text);
-    if (!parsed || !Array.isArray(parsed.ingredients) || !Array.isArray(parsed.recipes)) {
+    const isV2 = parsed && Array.isArray(parsed.clients);
+    const isV1 = parsed && Array.isArray(parsed.ingredients) && Array.isArray(parsed.recipes);
+    if (!isV2 && !isV1) {
       throw new Error('That file does not look like a Costimator export.');
     }
-    state = {
-      ingredients: parsed.ingredients,
-      recipes: parsed.recipes,
-      suppliers: parsed.suppliers || [],
-      settings: { ...defaultSettings(), ...(parsed.settings || {}) },
-    };
-    // An export from an older version comes in the old shape.
+    state = isV2
+      ? { activeClientId: parsed.activeClientId, clients: parsed.clients }
+      : {
+          // A v1 export is a single business; migrate() wraps it as one client.
+          ingredients: parsed.ingredients,
+          recipes: parsed.recipes,
+          suppliers: parsed.suppliers || [],
+          settings: parsed.settings || defaultSettings(),
+        };
     migrate(state);
     save();
     return state;
   }
 
-  function resetToSample() { state = seed(); save(); return state; }
-  function clearAll() { state = emptyState(); save(); return state; }
+  function resetToSample() { state = seed(); migrate(state); save(); return state; }
+
+  /** Clears the ACTIVE client only — other clients are untouched. */
+  function clearAll() {
+    const client = activeClient();
+    client.ingredients = [];
+    client.recipes = [];
+    client.suppliers = [];
+    client.orders = [];
+    client.venues = [{ id: uid('ven'), name: 'Main venue' }];
+    save();
+    return state;
+  }
 
   return {
-    uid, load, save, migrate, ingredients, recipes, suppliers, settings, ctx,
+    uid, load, save, migrate,
+    clients, activeClient, setActiveClient, addClient, renameClient, deleteClient,
+    venues, getVenue, upsertVenue, deleteVenue,
+    ingredients, recipes, suppliers, settings, ctx,
+    recipesWithSales, salesCtx,
+    orders, getOrder, nextOrderRef, upsertOrder, deleteOrder,
     upsertSupplier, supplierByName, supplierUsage, deleteSupplier,
     addOffer, deleteOffer, setPreferredOffer,
     getIngredient, getRecipe, upsertIngredient, upsertRecipe,

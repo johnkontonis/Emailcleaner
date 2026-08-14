@@ -289,5 +289,93 @@ const bothWays = Suppliers.adjustmentEmail(
 ok('undercharges are disclosed in the claim too',
   bothWays.body.includes('below the agreed price'), bothWays.body);
 
+// ---------------------------------------------------------------------------
+// Purchase orders: place at agreed prices, then match the invoice to the PO.
+// ---------------------------------------------------------------------------
+
+console.log('\nPurchase orders');
+const kiev = {
+  id: 'ing-kiev', name: 'Garlic chicken kiev', yieldPct: 100,
+  offers: [{ id: 'off-kiev', supplier: 'G&T Chickens', productCode: 'GT-KIE-200',
+    packSize: 20, packUnit: 'ea', packPrice: 88.0, agreedPrice: 88.0 }],
+};
+const poCtx = { ingredients: [schnitzelItem, chips, kiev], recipes: [] };
+const po = {
+  id: 'ord-1', ref: 'PO-0042', supplier: 'G&T Chickens', venueId: 'ven-1',
+  status: 'sent', createdAt: '2026-08-12',
+  lines: [
+    { ingredientId: 'ing-schnitzel', offerId: 'off-gt', qty: 4, packPrice: 96.0 },
+    { ingredientId: 'ing-kiev', offerId: 'off-kiev', qty: 2, packPrice: 88.0 },
+  ],
+};
+near('order total is priced at the locked agreed prices', Suppliers.orderTotal(po), 4 * 96 + 2 * 88);
+
+const poMail = Suppliers.orderEmail(po, poCtx, { business: 'The Local Hotel', venueName: 'Flemington' });
+ok('the order email names the PO', poMail.subject.includes('PO-0042'), poMail.subject);
+ok('the order email itemises product codes', poMail.body.includes('GT-SCH-300') && poMail.body.includes('GT-KIE-200'));
+ok('the order email totals the order', poMail.body.includes('$560.00'), poMail.body);
+ok('the order email says where to deliver', poMail.body.includes('Flemington'));
+ok('the order email asks for the PO on the invoice', poMail.body.includes('reference the PO number'));
+
+console.log('\nMatching an invoice to its PO');
+// Schnitzel: right qty, wrong price. Kiev: right price, one pack short.
+// Tenders: never ordered. One PO line (none here) fully missing is tested later.
+const poInvoice = `Product Code,Description,Qty,Unit Price
+GT-SCH-300,Crumbed chicken schnitzel,4,99.50
+GT-KIE-200,Garlic chicken kiev,1,88.00
+GT-TEN-5K,Crumbed chicken tenders,1,41.00`;
+const tendersItem = {
+  id: 'ing-tenders', name: 'Crumbed chicken tenders', yieldPct: 100,
+  offers: [{ id: 'off-ten', supplier: 'G&T Chickens', productCode: 'GT-TEN-5K',
+    packSize: 5, packUnit: 'kg', packPrice: 41.0, agreedPrice: 41.0 }],
+};
+const matchCtx = { ingredients: [schnitzelItem, chips, kiev, tendersItem], recipes: [] };
+const m = Suppliers.matchInvoiceToOrder(poInvoice, po, matchCtx);
+
+near('price variance is against the PO price, times invoiced qty', m.priceOverTotal, 3.5 * 4);
+ok('the overpriced line is identified', m.priceOver.length === 1 && m.priceOver[0].productCode === 'GT-SCH-300');
+ok('the short-delivered line is identified',
+  m.qtyShort.length === 1 && m.qtyShort[0].ingredientName.includes('kiev'),
+  JSON.stringify(m.qtyShort.map((l) => l.ingredientName)));
+near('short value is the missing packs at PO price', m.shortValue, 88.0);
+ok('the never-ordered line is reported, not silently priced',
+  m.notOnOrder.length === 1 && m.notOnOrder[0].ingredientName === 'Crumbed chicken tenders');
+near('not-on-order value is totalled', m.notOnOrderTotal, 41.0);
+ok('nothing on the PO is missing from this invoice', m.notInvoiced.length === 0);
+ok('a mismatched invoice is not clean', m.clean === false);
+
+const cleanInvoice = `Product Code,Qty,Unit Price
+GT-SCH-300,4,96.00
+GT-KIE-200,2,88.00`;
+const mc = Suppliers.matchInvoiceToOrder(cleanInvoice, po, matchCtx);
+ok('a correct invoice matches clean', mc.clean === true, JSON.stringify({
+  po: mc.priceOver.length, short: mc.qtyShort.length, extra: mc.notOnOrder.length, missing: mc.notInvoiced.length }));
+ok('clean lines are counted', mc.cleanCount === 2);
+
+const partialInvoice = `Product Code,Qty,Unit Price\nGT-SCH-300,4,96.00`;
+const mp = Suppliers.matchInvoiceToOrder(partialInvoice, po, matchCtx);
+ok('an ordered line missing from the invoice is reported as not invoiced',
+  mp.notInvoiced.length === 1 && mp.notInvoiced[0].ingredientName.includes('kiev'));
+ok('a partial invoice is not clean', mp.clean === false);
+
+const overDelivered = Suppliers.matchInvoiceToOrder(
+  `Product Code,Qty,Unit Price\nGT-SCH-300,6,96.00\nGT-KIE-200,2,88.00`, po, matchCtx);
+ok('invoicing above the ordered quantity is flagged',
+  overDelivered.qtyOver.length === 1 && overDelivered.qtyOver[0].qty === 6);
+
+console.log('\nPO claim email');
+const poClaim = Suppliers.orderAdjustmentEmail(m, { invoiceRef: 'INV-9001', business: 'The Local Hotel' });
+ok('the claim names PO and invoice', poClaim.subject.includes('PO-0042') && poClaim.subject.includes('INV-9001'));
+ok('price credit is requested with a figure', poClaim.body.includes('Credit requested for price variances: $14.00'));
+ok('the short delivery is a question, not a claim',
+  poClaim.body.includes('please advise delivery or back-order'));
+ok('the not-ordered line asks for confirmation',
+  poClaim.body.includes('not on our order'));
+ok('a discrepancy claim is not empty', poClaim.empty === false);
+
+const cleanPoMail = Suppliers.orderAdjustmentEmail(mc, { invoiceRef: 'INV-9002' });
+ok('a clean match produces a confirmation', cleanPoMail.empty === true);
+ok('and says both price and quantity matched', cleanPoMail.body.includes('price and quantity'));
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);
